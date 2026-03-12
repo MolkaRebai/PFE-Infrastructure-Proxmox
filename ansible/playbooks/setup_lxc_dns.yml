@@ -1,0 +1,51 @@
+- name: Configuration DNS Pi-hole
+  hosts: dns
+  become: true
+
+  tasks:
+
+    - name: Mise à jour du système
+      apt:
+        update_cache: yes
+        upgrade: dist
+
+    - name: Installer Python3
+      apt:
+        name: python3
+        state: present
+
+    - name: Installer curl et wget
+      apt:
+        name: ["curl", "wget"]
+        state: present
+
+    - name: Désactiver systemd-resolved (conflit port 53)
+      systemd:
+        name: systemd-resolved
+        enabled: no
+        state: stopped
+
+    - name: Supprimer resolv.conf lié
+      file:
+        path: /etc/resolv.conf
+        state: absent
+
+    - name: Créer nouveau resolv.conf
+      copy:
+        dest: /etc/resolv.conf
+        content: |
+          nameserver 8.8.8.8
+          nameserver 8.8.4.4
+
+    - name: Installer Pi-hole
+      shell: |
+        curl -sSL https://install.pi-hole.net | \
+        PIHOLE_SKIP_OS_CHECK=true bash /dev/stdin --unattended
+      args:
+        creates: /usr/local/bin/pihole
+
+    - name: Démarrer Pi-hole
+      systemd:
+        name: pihole-FTL
+        enabled: yes
+        state: started

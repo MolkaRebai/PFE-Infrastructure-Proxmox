@@ -1,0 +1,40 @@
+- name: Configuration Base de données PostgreSQL
+  hosts: db
+  become: true
+
+  tasks:
+
+    - name: Mise à jour du système
+      apt:
+        update_cache: yes
+        upgrade: dist
+
+    - name: Installer Python3
+      apt:
+        name: python3
+        state: present
+
+    - name: Installer PostgreSQL
+      apt:
+        name: ["postgresql", "postgresql-contrib", "python3-psycopg2"]
+        state: present
+
+    - name: Démarrer PostgreSQL
+      systemd:
+        name: postgresql
+        enabled: yes
+        state: started
+
+    - name: Créer la base de données app
+      become_user: postgres
+      postgresql_db:
+        name: appdb
+        state: present
+
+    - name: Créer l'utilisateur app
+      become_user: postgres
+      postgresql_user:
+        name: appuser
+        password: "AppMotDePasse!"
+        priv: "appdb.*:ALL"
+        state: present

@@ -1,0 +1,34 @@
+# Connexion Proxmox
+proxmox_url       = "https://172.19.14.90:8006/"
+proxmox_api_token = "root@pam!terraform=3cd48795-cbc6-43e3-a613-0a7c512b12d2"
+proxmox_node      = "pve"
+
+#Stockage NAS
+storage_vm     = "nas-vm"
+storage_iso    = "nas-iso"
+storage_backup = "nas-backup"
+
+#Réseau
+default_gateway = "172.19.14.1"
+default_dns     = ["172.19.14.1", "8.8.8.8"]
+default_bridge  = "vmbr0"
+
+#Admin
+admin_user           = "sysadmin"
+ssh_public_key       = "ssh-rsa AAAA... votre_cle_publique"
+ssh_private_key_path = "/home/ubuntu/.ssh/id_rsa"
+
+# Templates OS
+os_templates = {
+
+  # Linux Desktop
+  
+
+  # Linux Server
+  "ubuntu-server-24"  = 9000
+  
+
+  # Windows (pour plus tard)
+  
+
+}
