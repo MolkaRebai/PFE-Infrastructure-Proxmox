@@ -1,63 +1,58 @@
+#  Crée toutes les VMs définies dans vms.auto.tfvars
 
-terraform {
-  required_providers {
-    proxmox = {
-      source  = "bpg/proxmox"
-      version = "~> 0.60"
-    }
-  }
-  required_version = ">= 1.5.0"
-}
+#Création de toutes les VMs
+resource "proxmox_virtual_machine" "vms" {
+  for_each = var.vms   # boucle sur chaque VM définie dans vms.auto.tfvars
 
-provider "proxmox" {
-  endpoint  = var.proxmox_api_url
-  api_token = "${var.proxmox_api_token_id}=${var.proxmox_api_token_secret}"
-  insecure  = true  # Mettre false si certificat SSL valide
-}
-
-resource "proxmox_virtual_machine" "vm" {
+  # Identité
   node_name = var.proxmox_node
-  vm_id     = var.proxmox_vm_id
-  name      = var.hostname
-  tags      = ["terraform", var.os_template]
+  vm_id     = each.value.vm_id
+  name      = each.key              # clé de la map = nom de la VM
+  tags      = ["terraform", each.value.os]
 
+  # Clone depuis le template correspondant à l'OS choisi
   clone {
-    vm_id = var.proxmox_template_id
+    vm_id = var.os_templates[each.value.os]
     full  = true
   }
 
+  # CPU
   cpu {
-    cores   = var.cpu
+    cores   = each.value.cpu
     sockets = 1
     type    = "x86-64-v2-AES"
   }
 
+  # RAM
   memory {
-    dedicated = var.ram_mb
+    dedicated = each.value.ram_mb
   }
 
+  # Disque
   disk {
     interface    = "virtio0"
-    size         = var.disk_gb
-    datastore_id = var.proxmox_storage
+    size         = each.value.disk_gb
+    datastore_id = var.default_storage
+    discard      = "on"
   }
 
+  # Réseau
   network_device {
-    bridge = var.proxmox_bridge
+    bridge = var.default_bridge
     model  = "virtio"
   }
 
-  # Cloud-Init
+  # Cloud-Init : configure IP + user au premier démarrage
   initialization {
     ip_config {
       ipv4 {
-        address = "${var.ip_address}/${var.prefix_length}"
-        gateway = var.gateway
+        address = "${each.value.ip_address}/${each.value.prefix}"
+        gateway = var.default_gateway
       }
     }
 
     dns {
-      servers = split(",", var.dns_servers)
+      servers = var.default_dns
     }
 
     user_account {
@@ -67,10 +62,9 @@ resource "proxmox_virtual_machine" "vm" {
   }
 
   operating_system {
-    type = each.value.os_type
+    type = var.type
   }
 
-  # Attendre que la VM soit démarrée
   started         = true
   on_boot         = true
   stop_on_destroy = true
@@ -78,4 +72,33 @@ resource "proxmox_virtual_machine" "vm" {
   lifecycle {
     ignore_changes = [clone]
   }
+}
+
+#Génération automatique de l'inventory Ansible
+# Crée le fichier inventory.ini après la création des VMs
+resource "local_file" "ansible_inventory" {
+  filename = "${path.module}/../ansible/inventory.ini"
+
+  content = templatefile("${path.module}/inventory.tpl", {
+    vms            = var.vms
+    admin_user     = var.admin_user
+    ssh_key_path   = var.ssh_private_key_path
+  })
+
+  depends_on = [proxmox_virtual_machine.vms]
+}
+
+#Génération des variables Ansible par VM
+resource "local_file" "ansible_vars" {
+  filename = "${path.module}/../ansible/group_vars/all.yml"
+
+  content = templatefile("${path.module}/ansible_vars.tpl", {
+    vms         = var.vms
+    admin_user  = var.admin_user
+    ssh_pub_key = var.ssh_public_key
+    gateway     = var.default_gateway
+    dns         = var.default_dns
+  })
+
+  depends_on = [proxmox_virtual_machine.vms]
 }
