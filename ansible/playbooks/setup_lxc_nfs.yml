@@ -1,0 +1,41 @@
+---
+- name: Configuration Serveur NFS
+  hosts: nfs
+  become: true
+
+  tasks:
+
+    - name: Mise à jour du système
+      apt:
+        update_cache: yes
+        upgrade: dist
+
+    - name: Installer NFS server
+      apt:
+        name:
+          - nfs-kernel-server
+          - nfs-common
+        state: present
+
+    - name: Créer le dossier partagé
+      file:
+        path: /data/shared
+        state: directory
+        owner: nobody
+        group: nogroup
+        mode: "0777"
+
+    - name: Configurer les exports NFS
+      copy:
+        dest: /etc/exports
+        content: |
+          /data/shared 172.19.14.0/24(rw,sync,no_subtree_check,no_root_squash)
+
+    - name: Appliquer les exports
+      command: exportfs -ra
+
+    - name: Démarrer NFS
+      systemd:
+        name: nfs-kernel-server
+        enabled: yes
+        state: started

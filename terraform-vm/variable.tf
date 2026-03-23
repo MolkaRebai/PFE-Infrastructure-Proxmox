@@ -74,6 +74,15 @@ variable "os_templates" {
   type        = map(number)
 }
 
+#mot de passe vm
+variable "vm_password" {
+  description = "Mot de passe des VMs Linux"
+  type        = string
+  sensitive   = true
+    default     = "azerty123"
+
+}
+
 # Définition des VMs à créer
 variable "vms" {
   description = "Map de toutes les VMs à créer"

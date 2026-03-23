@@ -1,0 +1,47 @@
+---
+- name: Configuration Serveur Base de données vm-db-01
+  hosts: webservers
+  become: true
+
+  tasks:
+
+    - name: Supprimer le repo CD-ROM
+      lineinfile:
+        path: /etc/apt/sources.list
+        regexp: '.*cdrom.*'
+        state: absent
+
+    - name: Mise à jour du système
+      apt:
+        update_cache: yes
+        upgrade: dist
+
+    - name: Installer PostgreSQL
+      apt:
+        name:
+          - postgresql
+          - postgresql-contrib
+          - python3-psycopg2
+          - vim
+          - curl
+        state: present
+
+    - name: Démarrer PostgreSQL
+      systemd:
+        name: postgresql
+        enabled: yes
+        state: started
+
+    - name: Configurer UFW
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "22"
+        - "5432"
+
+    - name: Activer UFW
+      ufw:
+        state: enabled
+        default: deny

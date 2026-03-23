@@ -1,7 +1,8 @@
 # ── Création de toutes les VMs ────────────────────────────────────────────────
 resource "proxmox_virtual_environment_vm""vms" {
   for_each = var.vms   # boucle sur chaque VM définie dans vms.auto.tfvars
-
+  # Empêche les clones parallèles
+  depends_on = []
   # Identité
   node_name = var.proxmox_node
   vm_id     = each.value.vm_id
@@ -55,10 +56,11 @@ resource "proxmox_virtual_environment_vm""vms" {
         user_account {
             username = var.admin_user
             keys     = [var.ssh_public_key]
+            password = var.vm_password
         }
     }
 }
-
+#os
   operating_system {
     type = each.value.os_type
   }

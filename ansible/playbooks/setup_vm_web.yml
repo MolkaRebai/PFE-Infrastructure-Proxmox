@@ -1,0 +1,69 @@
+---
+- name: Configuration Serveur Web vm-web-01
+  hosts: databases
+  become: true
+
+  tasks:
+
+    - name: Supprimer le repo CD-ROM
+      lineinfile:
+        path: /etc/apt/sources.list
+        regexp: '.*cdrom.*'
+        state: absent
+
+    - name: Mise à jour du système
+      apt:
+        update_cache: yes
+        upgrade: dist
+
+    - name: Installer Python3
+      apt:
+        name: python3
+        state: present
+
+    - name: Installer Nginx
+      apt:
+        name: nginx
+        state: present
+
+    - name: Installer curl et vim
+      apt:
+        name:
+          - curl
+          - vim
+          - git
+        state: present
+
+    - name: Créer la page d'accueil
+      copy:
+        dest: /var/www/html/index.html
+        content: |
+          <!DOCTYPE html>
+          <html>
+            <head><title>Serveur Web</title></head>
+            <body>
+              <h1>vm-web-01 - Serveur Web</h1>
+              <p>Déployé avec Terraform + Ansible</p>
+            </body>
+          </html>
+
+    - name: Démarrer Nginx
+      systemd:
+        name: nginx
+        enabled: yes
+        state: started
+
+    - name: Configurer UFW
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "22"
+        - "80"
+        - "443"
+
+    - name: Activer UFW
+      ufw:
+        state: enabled
+        default: deny
