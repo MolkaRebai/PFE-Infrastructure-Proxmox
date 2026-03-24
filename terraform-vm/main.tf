@@ -56,11 +56,10 @@ resource "proxmox_virtual_environment_vm""vms" {
         user_account {
             username = var.admin_user
             keys     = [var.ssh_public_key]
-            password = var.vm_password
         }
     }
 }
-#os
+
   operating_system {
     type = each.value.os_type
   }

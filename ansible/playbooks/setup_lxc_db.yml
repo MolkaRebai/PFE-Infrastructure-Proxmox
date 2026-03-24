@@ -1,4 +1,74 @@
-- name: Créer l'utilisateur app
+---
+- name: Configuration Base de données PostgreSQL
+  hosts: db
+  become: true
+
+  tasks:
+    - name: Mise à jour du système (apt)
+      apt:
+        update_cache: yes
+        upgrade: dist
+
+    - name: Installer les dépendances (Python, psycopg2, ACL)
+      apt:
+        name: 
+          - python3
+          - python3-psycopg2
+          - acl  # Crucial pour le changement d'utilisateur (become_user)
+          - curl
+          - vim
+        state: present
+
+    - name: Installer PostgreSQL
+      apt:
+        name: ["postgresql", "postgresql-contrib"]
+        state: present
+      async: 600
+      poll: 10
+
+    - name: S'assurer que PostgreSQL est démarré
+      systemd:
+        name: postgresql
+        enabled: yes
+        state: started
+
+    # --- ÉTAPE DYNAMIQUE : Identification des chemins ---
+
+    - name: Trouver le chemin du fichier postgresql.conf
+      shell: find /etc/postgresql/ -name postgresql.conf
+      register: pg_conf_path
+      changed_when: false
+
+    - name: Trouver le chemin du fichier pg_hba.conf
+      shell: find /etc/postgresql/ -name pg_hba.conf
+      register: pg_hba_path
+      changed_when: false
+
+    # --- CONFIGURATION RÉSEAU ---
+
+    - name: Autoriser PostgreSQL à écouter sur toutes les interfaces
+      lineinfile:
+        path: "{{ pg_conf_path.stdout }}"
+        regexp: "^#?listen_addresses ="
+        line: "listen_addresses = '*'"
+      notify: Restart PostgreSQL
+
+    - name: Configurer le fichier pg_hba.conf (Autoriser le réseau local)
+      lineinfile:
+        path: "{{ pg_hba_path.stdout }}"
+        line: "host    appdb           appuser         172.19.14.0/24          md5"
+        insertafter: EOF
+      notify: Restart PostgreSQL
+
+    # --- CRÉATION DE LA BASE ET DE L'UTILISATEUR ---
+
+    - name: Créer la base de données appdb
+      become_user: postgres
+      postgresql_db:
+        name: appdb
+        state: present
+
+    - name: Créer l'utilisateur appuser
       become_user: postgres
       postgresql_user:
         name: appuser
@@ -6,7 +76,7 @@
         state: present
         role_attr_flags: "LOGIN"
 
-    - name: Donner les droits sur appdb
+    - name: Donner tous les privilèges sur appdb à appuser
       become_user: postgres
       postgresql_privs:
         database: appdb
@@ -14,3 +84,9 @@
         privs: ALL
         type: database
         state: present
+
+  handlers:
+    - name: Restart PostgreSQL
+      systemd:
+        name: postgresql
+        state: restarted
