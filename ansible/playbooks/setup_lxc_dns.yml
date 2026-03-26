@@ -1,94 +1,36 @@
-- name: Configuration DNS Pi-hole
+---
+- name: Configuration DNS Réseau (Solution Stable)
   hosts: dns
   become: true
+  gather_facts: no  # On désactive pour éviter le crash au premier contact
 
   tasks:
-    - name: Mise à jour du système
-      apt:
-        update_cache: yes
-        upgrade: dist
+    - name: 1. Attendre que le SSH soit prêt
+      wait_for_connection:
+        timeout: 60
 
-    - name: Installer les dépendances (Python, curl, wget)
-      apt:
-        name: ["python3", "curl", "wget"]
-        state: present
+    - name: 2. Collecter les informations système
+      setup:
 
-    - name: Désactiver systemd-resolved (évite conflit port 53)
-      systemd:
-        name: systemd-resolved
-        enabled: no
-        state: stopped
-
-    - name: Préparer resolv.conf pour l'installation
-      file:
-        path: /etc/resolv.conf
-        state: absent
-
-    - name: Créer nouveau resolv.conf (Google DNS)
+    - name: 3. Configurer resolv.conf (DNS Google)
       copy:
         dest: /etc/resolv.conf
         content: |
           nameserver 8.8.8.8
           nameserver 8.8.4.4
+        mode: '0644'
 
-    - name: Créer dossier de configuration Pi-hole
-      file:
-        path: /etc/pihole
-        state: directory
-        mode: '0755'
+    - name: 4. Mise à jour et Installation outils de base
+      apt:
+        name: [curl, wget, dnsutils, net-tools]
+        state: present
+        update_cache: yes
 
-    # --- ÉTAPE CRUCIALE : Télécharger AVANT d'installer ---
-    - name: Télécharger le script Pi-hole
-      get_url:
-        url: https://install.pi-hole.net
-        dest: /tmp/pihole_install.sh
-        mode: "0755"
-    - name: Créer fichier de configuration Pi-hole
-      copy:
-        dest: /etc/pihole/setupVars.conf
-        content: |
-          PIHOLE_INTERFACE=eth0
-          IPV4_ADDRESS=172.19.14.200/24
-          IPV6_ADDRESS=
-          PIHOLE_DNS_1=8.8.8.8
-          PIHOLE_DNS_2=8.8.4.4
-          QUERY_LOGGING=true
-          INSTALL_WEB_SERVER=true
-          INSTALL_WEB_INTERFACE=true
-          LIGHTTPD_ENABLED=true
-          CACHE_SIZE=10000
-          DNS_FQDN_REQUIRED=false
-          DNS_BOGUS_PRIV=false
-          DNSMASQ_LISTENING=local
-          WEBPASSWORD=Admin@2025
-          BLOCKING_ENABLED=true
-      when: inventory_hostname == 'lxc-dns-1'
+    - name: 5. Test de sortie internet
+      command: ping -c 2 google.com
+      register: ping_test
+      changed_when: false
 
-    - name: Créer fichier setupVars.conf (Configuration automatique)
-      copy:
-        dest: /etc/pihole/setupVars.conf
-        content: |
-          PIHOLE_INTERFACE=eth0
-          IPV4_ADDRESS={{ ansible_default_ipv4.address }}/24
-          PIHOLE_DNS_1=8.8.8.8
-          PIHOLE_DNS_2=8.8.4.4
-          QUERY_LOGGING=true
-          INSTALL_WEB_SERVER=true
-          INSTALL_WEB_INTERFACE=true
-          LIGHTTPD_ENABLED=true
-          CACHE_SIZE=10000
-          DNS_FQDN_REQUIRED=false
-          DNS_BOGUS_PRIV=false
-          DNSMASQ_LISTENING=local
-          WEBPASSWORD=Admin@2026
-          BLOCKING_ENABLED=true
-
-    - name: Exécuter l'installation de Pi-hole (Unattended)
-      environment:
-        PIHOLE_SKIP_OS_CHECK: "true"
-        DEBIAN_FRONTEND: "noninteractive"
-      shell: /tmp/pihole_install.sh --unattended
-      args:
-        creates: /usr/local/bin/pihole
-      async: 600
-      poll: 30
+    - name: Résultat
+      debug:
+        msg: "Connexion OK pour {{ inventory_hostname }}"

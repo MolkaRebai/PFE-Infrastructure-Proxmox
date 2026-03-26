@@ -1,0 +1,57 @@
+---
+# ============================================================
+#  setup_zabbix_agents.yml
+#  Installe Zabbix Agent sur Linux (VMs et LXC)
+# ============================================================
+
+- name: Déploiement Zabbix Agent sur Infrastructure Linux
+  hosts: vms, lxc_containers
+  become: true
+
+  vars:
+    zabbix_server_ip: "172.19.14.52"
+
+  tasks:
+    # --- Installation du dépôt (Uniquement pour les VMs Linux) ---
+    - name: "[VM Only] Télécharger et installer le repo Zabbix 7.0"
+      apt:
+        deb: "https://repo.zabbix.com/zabbix/7.0/ubuntu/pool/main/z/zabbix-release/zabbix-release_latest+ubuntu24.04_all.deb"
+      when: inventory_hostname in groups['vms']
+
+    - name: "Mettre à jour le cache apt"
+      apt:
+        update_cache: yes
+
+    - name: "Installer Zabbix Agent"
+      apt:
+        name: zabbix-agent
+        state: present
+
+    - name: "Configurer le fichier zabbix_agentd.conf"
+      lineinfile:
+        path: /etc/zabbix/zabbix_agentd.conf
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      loop:
+        - { regexp: "^Server=",       line: "Server={{ zabbix_server_ip }}" }
+        - { regexp: "^ServerActive=", line: "ServerActive={{ zabbix_server_ip }}" }
+        - { regexp: "^Hostname=",      line: "Hostname={{ inventory_hostname }}" }
+      notify: restart zabbix-agent
+
+    - name: "[VM Only] Autoriser le port 10050 dans le pare-feu"
+      shell: ufw allow 10050/tcp
+      when: inventory_hostname in groups['vms']
+      ignore_errors: yes
+
+    # --- Gestion du service ---
+    - name: "Démarrer et Activer le service Zabbix Agent"
+      systemd:
+        name: zabbix-agent
+        enabled: yes
+        state: started
+
+  handlers:
+    - name: restart zabbix-agent
+      systemd:
+        name: zabbix-agent
+        state: restarted

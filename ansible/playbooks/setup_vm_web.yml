@@ -1,6 +1,6 @@
 ---
 - name: Configuration Serveur Web vm-web-01
-  hosts: databases
+  hosts: webserver
   become: true
 
   tasks:
@@ -40,7 +40,10 @@
         content: |
           <!DOCTYPE html>
           <html>
-            <head><title>Serveur Web</title></head>
+            <head>
+            <meta charset="UTF-8">
+            <title>Serveur Web</title>
+            </head>
             <body>
               <h1>vm-web-01 - Serveur Web</h1>
               <p>Déployé avec Terraform + Ansible</p>

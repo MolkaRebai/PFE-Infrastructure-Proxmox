@@ -1,91 +1,129 @@
 ---
-- name: "Installation et Configuration Automatisée de Zabbix 7.0 LTS"
+- name: Configuration Serveur Zabbix
   hosts: monitoring
-  become: yes
+  become: true
+
   vars:
-    zabbix_db_password: "azerty123"
-    zabbix_version: "7.0"
-    ubuntu_version: "24.04"
-
+    zabbix_db_name: zabbix
+    zabbix_db_user: zabbix
+    zabbix_db_password: "Zabbix@2025"
+    zabbix_db_host: "172.19.14.55"    
+    
   tasks:
-    - name: "0. Suppression définitive des sources CD-ROM"
-      shell: |
-        find /etc/apt/ -name "*.sources" -exec sed -i '/cdrom/d' {} +
-        find /etc/apt/ -name "*.list" -exec sed -i '/cdrom/d' {} +
-      args:
-        warn: false
-
-    - name: 1. Installer les dépendances Python pour PostgreSQL
+    - name: Réparer l'erreur de langue (Locale)
       apt:
-        name: 
-          - python3-psycopg2
-          - acl # Nécessaire pour que 'become_user: postgres' fonctionne
+        name: locales
         state: present
+
+    - name: Configurer UTF-8
+      shell: |
+        locale-gen en_US.UTF-8
+        update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+      changed_when: false
+
+    - name: Supprimer le repo CD-ROM
+      lineinfile:
+        path: /etc/apt/sources.list
+        regexp: '.*cdrom.*'
+        state: absent
+
+    - name: Mise à jour du système
+      apt:
+        update_cache: yes
+        upgrade: dist
+
+    - name: Installer les dépendances
+      apt:
+        name:
+          - wget
+          - curl
+          - gnupg
+          - python3
+          - python3-psycopg2
+        state: present
+
+    - name: Télécharger le repo Zabbix
+      get_url:
+        url: https://repo.zabbix.com/zabbix/7.0/ubuntu/pool/main/z/zabbix-release/zabbix-release_latest+ubuntu24.04_all.deb
+        dest: /tmp/zabbix-release.deb
+
+    - name: Installer le repo Zabbix
+      apt:
+        deb: /tmp/zabbix-release.deb
+
+    - name: Mettre à jour le cache apt
+      apt:
         update_cache: yes
 
-    - name: 2. Ajouter le dépôt officiel Zabbix
-      apt:
-        deb: "https://repo.zabbix.com/zabbix/{{ zabbix_version }}/ubuntu/pool/main/z/zabbix-release/zabbix-release_latest_{{ zabbix_version }}+ubuntu{{ ubuntu_version }}_all.deb"
-
-    - name: 3. Installer la pile Zabbix (Serveur, Frontend, Agent, DB)
+    - name: Installer Zabbix Server + Frontend + Agent
       apt:
         name:
           - zabbix-server-pgsql
           - zabbix-frontend-php
-          - php8.3-pgsql
-          - zabbix-nginx-conf
+          - zabbix-apache-conf
           - zabbix-sql-scripts
           - zabbix-agent
-          - postgresql
         state: present
-        update_cache: yes
 
-    - name: 4. Configurer la base de données PostgreSQL
-      become_user: postgres
-      block:
-        - postgresql_user:
-            name: zabbix
-            password: "{{ zabbix_db_password }}"
-        - postgresql_db:
-            name: zabbix
-            owner: zabbix
-
-    - name: 5. Importer le schéma SQL initial (Patienter ~1-2 min)
-      shell: "zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz | PGPASSWORD='{{ zabbix_db_password }}' psql -h localhost -U zabbix zabbix"
+    # ── Importer le schéma dans vm-db-01 ─────────────────────
+    - name: Importer le schéma Zabbix dans vm-db-01
+      shell: |
+        zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz | \
+        psql -h {{ zabbix_db_host }} -U {{ zabbix_db_user }} {{ zabbix_db_name }}
+      environment:
+        PGPASSWORD: "{{ zabbix_db_password }}"
       args:
-        creates: /var/lib/postgresql/.zabbix_imported 
+        creates: /etc/zabbix/.schema_imported
 
-    - name: 6. Marquer l'import comme terminé
+    - name: Marquer schéma comme importé
       file:
-        path: /var/lib/postgresql/.zabbix_imported
+        path: /etc/zabbix/.schema_imported
         state: touch
 
-    - name: 7. Configurer le mot de passe dans zabbix_server.conf
+    # ── Configurer Zabbix Server ──────────────────────────────
+    - name: Configurer zabbix_server.conf
       lineinfile:
         path: /etc/zabbix/zabbix_server.conf
-        regexp: '^# DBPassword='
-        line: "DBPassword={{ zabbix_db_password }}"
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      loop:
+        - { regexp: "^#*DBHost=",     line: "DBHost={{ zabbix_db_host }}" }
+        - { regexp: "^#*DBName=",     line: "DBName={{ zabbix_db_name }}" }
+        - { regexp: "^#*DBUser=",     line: "DBUser={{ zabbix_db_user }}" }
+        - { regexp: "^#*DBPassword=", line: "DBPassword={{ zabbix_db_password }}" }
+      notify: restart zabbix-server
 
-    - name: 8. Configurer Nginx pour Zabbix
-      replace:
-        path: /etc/zabbix/nginx.conf
-        regexp: '# listen 80;'
-        replace: 'listen 80;'
-
-    - name: 9. Définir le nom du serveur dans Nginx
-      replace:
-        path: /etc/zabbix/nginx.conf
-        regexp: '# server_name example.com;'
-        replace: "server_name {{ ansible_host }};"
-
-    - name: 10. Démarrer et Activer tous les services
+    # ── Démarrer les services ─────────────────────────────────
+    - name: Démarrer Zabbix Server + Agent + Apache
       systemd:
         name: "{{ item }}"
-        state: restarted
         enabled: yes
+        state: started
       loop:
-        - postgresql
         - zabbix-server
         - zabbix-agent
-        - nginx
-        - php8.3-fpm
+        - apache2
+
+    # ── Firewall ──────────────────────────────────────────────
+    - name: Configurer UFW
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "22"
+        - "80"
+        - "443"
+        - "10051"
+        - "10050"
+
+    - name: Activer UFW
+      ufw:
+        state: enabled
+        default: deny
+
+  handlers:
+    - name: restart zabbix-server
+      systemd:
+        name: zabbix-server
+        state: restarted

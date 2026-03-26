@@ -1,7 +1,6 @@
 ---
 - name: Configuration Serveur Base de données vm-db-01
-  hosts: webservers
-  become: true
+  hosts: databases 
 
   tasks:
 
@@ -12,9 +11,10 @@
         state: absent
 
     - name: Mise à jour du système
-      apt:
-        update_cache: yes
-        upgrade: dist
+      shell: |
+        apt-get update -y
+        apt-get upgrade -y
+      become: true
 
     - name: Installer PostgreSQL
       apt:
@@ -32,16 +32,37 @@
         enabled: yes
         state: started
 
-    - name: Configurer UFW
-      ufw:
-        rule: allow
-        port: "{{ item }}"
-        proto: tcp
-      loop:
-        - "22"
-        - "5432"
+    # ── Créer les utilisateurs et bases de données ────────────
+    - name: Créer utilisateurs et bases de données
+      shell: |
+        sudo -u postgres psql -c "CREATE USER appuser WITH PASSWORD 'azerty123';" 2>/dev/null || true
+        sudo -u postgres psql -c "CREATE DATABASE appdb OWNER appuser;" 2>/dev/null || true
+        sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE appdb TO appuser;" 2>/dev/null || true
+        sudo -u postgres psql -c "CREATE USER zabbix WITH PASSWORD 'Zabbix@2025';" 2>/dev/null || true
+        sudo -u postgres psql -c "CREATE DATABASE zabbix OWNER zabbix;" 2>/dev/null || true
+        sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE zabbix TO zabbix;" 2>/dev/null || true
+      become: true
+      become_method: sudo
 
-    - name: Activer UFW
-      ufw:
-        state: enabled
-        default: deny
+    # ── Autoriser connexions distantes ────────────────────────
+    - name: Autoriser connexions distantes
+      shell: |
+        sed -i "s/^#*listen_addresses.*/listen_addresses = '*'/" /etc/postgresql/16/main/postgresql.conf
+        grep -qF "172.19.14.0/24" /etc/postgresql/16/main/pg_hba.conf || echo "host    all             all             172.19.14.0/24          md5" >> /etc/postgresql/16/main/pg_hba.conf
+        systemctl restart postgresql
+      become: true
+
+    # ── Firewall ──────────────────────────────────────────────
+    - name: Configurer et activer UFW
+      shell: |
+        ufw allow 22/tcp
+        ufw allow 5432/tcp
+        ufw --force enable
+        ufw default deny incoming
+      become: true
+
+  handlers:
+    - name: restart postgresql
+      systemd:
+        name: postgresql
+        state: restarted
