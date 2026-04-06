@@ -1,0 +1,23 @@
+---
+- name: Importer les données manquantes (Templates/Images)
+  hosts: monitoring
+  become: true
+  vars:
+    zabbix_db_host: "172.19.14.55"
+    zabbix_db_user: "zabbix"
+    zabbix_db_password: "Zabbix@2025"
+    zabbix_db_name: "zabbix"
+
+  tasks:
+    - name: Vérifier l'existence du fichier de données
+      stat:
+        path: /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz
+      register: sql_file
+
+    - name: Importer les données dans la DB
+      shell: |
+        zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz | \
+        psql -h {{ zabbix_db_host }} -U {{ zabbix_db_user }} {{ zabbix_db_name }}
+      environment:
+        PGPASSWORD: "{{ zabbix_db_password }}"
+      when: sql_file.stat.exists
