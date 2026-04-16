@@ -1,0 +1,555 @@
+name: Resource Management
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    inputs:
+      vm_name:
+        description: 'VM to scale (ex: vm-web-01)'
+        required: false
+      action:
+        description: 'Action (analyze/scale-up/scale-down)'
+        required: true
+        default: 'analyze'
+        type: choice
+        options:
+          - analyze
+          - scale-up
+          - scale-down
+          
+  repository_dispatch:
+    types: [zabbix-alert]
+
+env:
+  ZABBIX_URL: "http://172.19.14.52/zabbix"
+  ZABBIX_USER: "Admin"
+  ZABBIX_PASSWORD: ${{ secrets.ZABBIX_PASSWORD }}
+  PROXMOX_HOST: ${{ secrets.PROXMOX_HOST }}
+  PROXMOX_TOKEN: ${{ secrets.PROXMOX_API_TOKEN }}
+
+jobs:
+  # ── Job 1 : Analyser les métriques Zabbix ───────────────
+  analyze-resources:
+    name: Analyze Zabbix Metrics
+    runs-on: ubuntu-latest
+    outputs:
+      # Résultats partagés avec les autres jobs
+      scale_up_vms: ${{ steps.analyze.outputs.scale_up_vms }}
+      scale_down_vms: ${{ steps.analyze.outputs.scale_down_vms }}
+      critical_vms: ${{ steps.analyze.outputs.critical_vms }}
+      report: ${{ steps.analyze.outputs.report }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Python dependencies
+        run: |
+          pip install requests pandas jinja2
+          # requests = appels API HTTP
+          # pandas   = analyse des données
+          # jinja2   = templates pour rapports
+
+      # Script Python d'analyse Zabbix
+      - name: Analyze Zabbix Metrics
+        id: analyze
+        run: |
+          cat > /tmp/analyze_zabbix.py << 'PYTHON'
+          import requests
+          import json
+          import os
+          import sys
+
+          ZABBIX_URL = os.environ.get("ZABBIX_URL")
+          ZABBIX_USER = os.environ.get("ZABBIX_USER")
+          ZABBIX_PASSWORD = os.environ.get("ZABBIX_PASSWORD")
+
+          # ── Seuils d'alerte ──────────────────────────────
+          THRESHOLDS = {
+              "cpu": {
+                  "scale_up"   : 80,  # CPU > 80% → augmenter
+                  "scale_down" : 20,  # CPU < 20% → diminuer
+                  "critical"   : 95,  # CPU > 95% → alerte critique
+              },
+              "ram": {
+                  "scale_up"   : 85,  # RAM > 85% → augmenter
+                  "scale_down" : 30,  # RAM < 30% → diminuer
+                  "critical"   : 95,  # RAM > 95% → alerte critique
+              },
+              "disk": {
+                  "warning"    : 80,  # Disque > 80% → avertissement
+                  "critical"   : 90,  # Disque > 90% → critique
+              }
+          }
+
+          def zabbix_login():
+              """Se connecter à l'API Zabbix"""
+              response = requests.post(
+                  f"{ZABBIX_URL}/api_jsonrpc.php",
+                  json={
+                      "jsonrpc": "2.0",
+                      "method": "user.login",
+                      "params": {
+                          "username": ZABBIX_USER,
+                          "password": ZABBIX_PASSWORD
+                      },
+                      "id": 1
+                  }
+              )
+              return response.json()["result"]
+
+          def get_hosts(token):
+              """Récupérer tous les hosts Zabbix"""
+              response = requests.post(
+                  f"{ZABBIX_URL}/api_jsonrpc.php",
+                  json={
+                      "jsonrpc": "2.0",
+                      "method": "host.get",
+                      "params": {
+                          "output": ["hostid", "host", "name"],
+                          "selectInterfaces": ["ip"],
+                          "filter": {"status": 0}
+                          # status 0 = hosts actifs uniquement
+                      },
+                      "auth": token,
+                      "id": 2
+                  }
+              )
+              return response.json()["result"]
+
+          def get_metrics(token, hostid):
+              """Récupérer CPU, RAM, Disk pour un host"""
+              # Clés Zabbix pour Ubuntu et Windows
+              keys = [
+                  # CPU
+                  "system.cpu.util",           # Linux
+                  "perf_counter[\\Processor(_Total)\\% Processor Time]",  # Windows
+
+                  # RAM
+                  "vm.memory.util",            # Linux
+                  "perf_counter[\\Memory\\% Committed Bytes In Use]",      # Windows
+
+                  # Disk
+                  "vfs.fs.size[/,pused]",      # Linux
+                  "perf_counter[\\LogicalDisk(C:)\\% Free Space]",         # Windows
+              ]
+
+              response = requests.post(
+                  f"{ZABBIX_URL}/api_jsonrpc.php",
+                  json={
+                      "jsonrpc": "2.0",
+                      "method": "item.get",
+                      "params": {
+                          "output": ["itemid", "key_", "lastvalue", "units"],
+                          "hostids": hostid,
+                          "filter": {"key_": keys},
+                          "sortfield": "key_"
+                      },
+                      "auth": token,
+                      "id": 3
+                  }
+              )
+              return response.json().get("result", [])
+
+          def get_historical_avg(token, itemid, hours=24):
+              """Moyenne sur les dernières X heures"""
+              import time
+              time_till = int(time.time())
+              time_from = time_till - (hours * 3600)
+
+              response = requests.post(
+                  f"{ZABBIX_URL}/api_jsonrpc.php",
+                  json={
+                      "jsonrpc": "2.0",
+                      "method": "history.get",
+                      "params": {
+                          "output": "extend",
+                          "itemids": itemid,
+                          "time_from": time_from,
+                          "time_till": time_till,
+                          "history": 0,
+                          # history 0 = données numériques float
+                          "sortfield": "clock",
+                          "sortorder": "DESC"
+                      },
+                      "auth": token,
+                      "id": 4
+                  }
+              )
+              history = response.json().get("result", [])
+              if history:
+                  values = [float(h["value"]) for h in history]
+                  return sum(values) / len(values)
+              return 0
+
+          def analyze_host(token, host):
+              """Analyser les ressources d'un host"""
+              metrics = get_metrics(token, host["hostid"])
+              result = {
+                  "name"      : host["host"],
+                  "ip"        : host.get("interfaces", [{}])[0].get("ip", "N/A"),
+                  "cpu"       : 0,
+                  "ram"       : 0,
+                  "disk"      : 0,
+                  "status"    : "ok",
+                  "actions"   : []
+              }
+
+              for metric in metrics:
+                  value = float(metric["lastvalue"] or 0)
+                  key = metric["key_"]
+
+                  # CPU
+                  if "cpu" in key.lower() or "Processor" in key:
+                      result["cpu"] = round(value, 2)
+                      # Moyenne 24h
+                      avg = get_historical_avg(
+                          token, metric["itemid"], hours=24
+                      )
+                      result["cpu_avg_24h"] = round(avg, 2)
+
+                      if value > THRESHOLDS["cpu"]["critical"]:
+                          result["status"] = "critical"
+                          result["actions"].append("SCALE_UP_CPU_URGENT")
+                      elif value > THRESHOLDS["cpu"]["scale_up"]:
+                          result["actions"].append("SCALE_UP_CPU")
+                      elif avg < THRESHOLDS["cpu"]["scale_down"]:
+                          result["actions"].append("SCALE_DOWN_CPU")
+
+                  # RAM
+                  elif "memory" in key.lower() or "Memory" in key:
+                      result["ram"] = round(value, 2)
+                      avg = get_historical_avg(
+                          token, metric["itemid"], hours=24
+                      )
+                      result["ram_avg_24h"] = round(avg, 2)
+
+                      if value > THRESHOLDS["ram"]["critical"]:
+                          result["status"] = "critical"
+                          result["actions"].append("SCALE_UP_RAM_URGENT")
+                      elif value > THRESHOLDS["ram"]["scale_up"]:
+                          result["actions"].append("SCALE_UP_RAM")
+                      elif avg < THRESHOLDS["ram"]["scale_down"]:
+                          result["actions"].append("SCALE_DOWN_RAM")
+
+                  # Disk
+                  elif "disk" in key.lower() or "LogicalDisk" in key:
+                      result["disk"] = round(value, 2)
+                      if value > THRESHOLDS["disk"]["critical"]:
+                          result["status"] = "critical"
+                          result["actions"].append("DISK_CRITICAL")
+                      elif value > THRESHOLDS["disk"]["warning"]:
+                          result["actions"].append("DISK_WARNING")
+
+              return result
+
+          # ── Main ─────────────────────────────────────────
+          def main():
+              print("Connecting to Zabbix...")
+              token = zabbix_login()
+
+              print("Getting hosts...")
+              hosts = get_hosts(token)
+              print(f"Found {len(hosts)} hosts")
+
+              scale_up_vms   = []
+              scale_down_vms = []
+              critical_vms   = []
+              report_lines   = []
+
+              for host in hosts:
+                  print(f"Analyzing {host['host']}...")
+                  analysis = analyze_host(token, host)
+
+                  # Construire le rapport
+                  report_lines.append(
+                      f"{analysis['name']} | "
+                      f"CPU: {analysis['cpu']}% "
+                      f"(avg24h: {analysis.get('cpu_avg_24h', 0)}%) | "
+                      f"RAM: {analysis['ram']}% | "
+                      f"Disk: {analysis['disk']}% | "
+                      f"Status: {analysis['status']}"
+                  )
+
+                  # Classer les VMs
+                  if "SCALE_UP_CPU" in analysis["actions"] or \
+                     "SCALE_UP_RAM" in analysis["actions"]:
+                      scale_up_vms.append({
+                          "name"   : analysis["name"],
+                          "actions": analysis["actions"],
+                          "cpu"    : analysis["cpu"],
+                          "ram"    : analysis["ram"]
+                      })
+
+                  if "SCALE_DOWN_CPU" in analysis["actions"] or \
+                     "SCALE_DOWN_RAM" in analysis["actions"]:
+                      scale_down_vms.append({
+                          "name"   : analysis["name"],
+                          "actions": analysis["actions"]
+                      })
+
+                  if analysis["status"] == "critical":
+                      critical_vms.append(analysis["name"])
+
+              # Écrire les outputs GitHub Actions
+              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                  f.write(f"scale_up_vms={json.dumps(scale_up_vms)}\n")
+                  f.write(f"scale_down_vms={json.dumps(scale_down_vms)}\n")
+                  f.write(f"critical_vms={json.dumps(critical_vms)}\n")
+                  report = "\n".join(report_lines)
+                  f.write(f"report={report}\n")
+
+              print("\n=== Analysis Complete ===")
+              print(f"Scale UP needed  : {len(scale_up_vms)} VMs")
+              print(f"Scale DOWN needed: {len(scale_down_vms)} VMs")
+              print(f"Critical         : {len(critical_vms)} VMs")
+
+          main()
+          PYTHON
+          python3 /tmp/analyze_zabbix.py
+        env:
+          ZABBIX_URL: ${{ env.ZABBIX_URL }}
+          ZABBIX_USER: ${{ env.ZABBIX_USER }}
+          ZABBIX_PASSWORD: ${{ env.ZABBIX_PASSWORD }}
+
+  # ── Job 2 : Scale Up ─────────────────────────────────────
+  scale-up:
+    name: Scale Up Resources
+    runs-on: ubuntu-latest
+    needs: analyze-resources
+    if: needs.analyze-resources.outputs.scale_up_vms != '[]'
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Scale Up VMs
+        run: |
+          cat > /tmp/scale_up.py << 'PYTHON'
+          import json
+          import subprocess
+          import os
+          import re
+
+          scale_up_vms = json.loads(
+              os.environ.get("SCALE_UP_VMS", "[]")
+          )
+
+          for vm in scale_up_vms:
+              name    = vm["name"]
+              actions = vm["actions"]
+              
+              print(f"\nScaling up {name}...")
+              
+              # Lire le fichier tfvars actuel
+              with open("terraform-vm/vm.auto.tfvars", "r") as f:
+                  content = f.read()
+              
+              # Trouver le bloc de la VM
+              vm_block_pattern = rf'"{name}"\s*=\s*\{{[^}}]+\}}'
+              vm_block = re.search(vm_block_pattern, content, re.DOTALL)
+              
+              if not vm_block:
+                  print(f"VM {name} not found in tfvars")
+                  continue
+              
+              vm_config = vm_block.group(0)
+              new_config = vm_config
+              
+              # Scale UP CPU
+              if "SCALE_UP_CPU" in actions or \
+                 "SCALE_UP_CPU_URGENT" in actions:
+                  cpu_match = re.search(r'cpu\s*=\s*(\d+)', vm_config)
+                  if cpu_match:
+                      current_cpu = int(cpu_match.group(1))
+                      # Doubler le CPU (max 16)
+                      new_cpu = min(current_cpu * 2, 16)
+                      new_config = new_config.replace(
+                          f"cpu = {current_cpu}",
+                          f"cpu = {new_cpu}"
+                      )
+                      print(f"  CPU: {current_cpu} → {new_cpu}")
+              
+              # Scale UP RAM
+              if "SCALE_UP_RAM" in actions or \
+                 "SCALE_UP_RAM_URGENT" in actions:
+                  ram_match = re.search(r'ram_mb\s*=\s*(\d+)', vm_config)
+                  if ram_match:
+                      current_ram = int(ram_match.group(1))
+                      # Augmenter RAM de 50% (max 32GB)
+                      new_ram = min(int(current_ram * 1.5), 32768)
+                      new_config = new_config.replace(
+                          f"ram_mb = {current_ram}",
+                          f"ram_mb = {new_ram}"
+                      )
+                      print(f"  RAM: {current_ram}MB → {new_ram}MB")
+              
+              # Mettre à jour le fichier
+              content = content.replace(vm_config, new_config)
+              with open("terraform-vm/vm.auto.tfvars", "w") as f:
+                  f.write(content)
+              
+              # Appliquer Terraform pour cette VM uniquement
+              result = subprocess.run([
+                  "terraform", "plan",
+                  f"-target=proxmox_virtual_environment_vm.vms[\"{name}\"]",
+              ], cwd="terraform-vm", capture_output=True, text=True)
+              
+              if result.returncode == 0:
+                  print(f" {name} scaled up successfully")
+              else:
+                  print(f" {name} scale up failed")
+                  print(result.stderr)
+
+          PYTHON
+          python3 /tmp/scale_up.py
+        env:
+          SCALE_UP_VMS: ${{ needs.analyze-resources.outputs.scale_up_vms }}
+          TF_VAR_proxmox_api_token: ${{ secrets.PROXMOX_API_TOKEN }}
+          TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+
+      - name: Commit Scale Up Changes
+        run: |
+          git config user.email "github-actions@github.com"
+          git config user.name "GitHub Actions Bot"
+          git add terraform-vm/vm.auto.tfvars
+          git diff --staged --quiet || \
+            git commit -m "auto-scale: scale up resources $(date +%Y-%m-%d)"
+          git push
+
+  # ── Job 3 : Scale Down ───────────────────────────────────
+  scale-down:
+    name: Scale Down Resources
+    runs-on: ubuntu-latest
+    needs: analyze-resources
+    if: needs.analyze-resources.outputs.scale_down_vms != '[]'
+    environment: production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Scale Down VMs
+        run: |
+          cat > /tmp/scale_down.py << 'PYTHON'
+          import json
+          import subprocess
+          import os
+          import re
+
+          scale_down_vms = json.loads(
+              os.environ.get("SCALE_DOWN_VMS", "[]")
+          )
+
+          for vm in scale_down_vms:
+              name    = vm["name"]
+              actions = vm["actions"]
+              
+              print(f"\nScaling down {name}...")
+              
+              with open("terraform-vm/vm.auto.tfvars", "r") as f:
+                  content = f.read()
+              
+              vm_block_pattern = rf'"{name}"\s*=\s*\{{[^}}]+\}}'
+              vm_block = re.search(vm_block_pattern, content, re.DOTALL)
+              
+              if not vm_block:
+                  continue
+              
+              vm_config = vm_block.group(0)
+              new_config = vm_config
+              
+              # Scale DOWN CPU
+              if "SCALE_DOWN_CPU" in actions:
+                  cpu_match = re.search(r'cpu\s*=\s*(\d+)', vm_config)
+                  if cpu_match:
+                      current_cpu = int(cpu_match.group(1))
+                      # Réduire CPU de moitié (min 2)
+                      new_cpu = max(current_cpu // 2, 2)
+                      new_config = new_config.replace(
+                          f"cpu = {current_cpu}",
+                          f"cpu = {new_cpu}"
+                      )
+                      print(f"  CPU: {current_cpu} → {new_cpu}")
+              
+              # Scale DOWN RAM
+              if "SCALE_DOWN_RAM" in actions:
+                  ram_match = re.search(r'ram_mb\s*=\s*(\d+)', vm_config)
+                  if ram_match:
+                      current_ram = int(ram_match.group(1))
+                      # Réduire RAM de 25% (min 2GB)
+                      new_ram = max(int(current_ram * 0.75), 2048)
+                      new_config = new_config.replace(
+                          f"ram_mb = {current_ram}",
+                          f"ram_mb = {new_ram}"
+                      )
+                      print(f"  RAM: {current_ram}MB → {new_ram}MB")
+              
+              content = content.replace(vm_config, new_config)
+              with open("terraform-vm/vm.auto.tfvars", "w") as f:
+                  f.write(content)
+              
+              result = subprocess.run([
+                  "terraform", "plan",
+                  f"-target=proxmox_virtual_environment_vm.vms[\"{name}\"]",
+              ], cwd="terraform-vm", capture_output=True, text=True)
+              
+              if result.returncode == 0:
+                  print(f" {name} scaled down successfully")
+              else:
+                  print(f" {name} scale down failed")
+
+          PYTHON
+          python3 /tmp/scale_down.py
+        env:
+          SCALE_DOWN_VMS: ${{ needs.analyze-resources.outputs.scale_down_vms }}
+          TF_VAR_proxmox_api_token: ${{ secrets.PROXMOX_API_TOKEN }}
+          TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+
+      - name: Commit Scale Down Changes
+        run: |
+          git config user.email "github-actions@github.com"
+          git config user.name "GitHub Actions Bot"
+          git add terraform-vm/vm.auto.tfvars
+          git diff --staged --quiet || \
+            git commit -m "auto-scale: scale down resources $(date +%Y-%m-%d)"
+          git push
+
+  # ── Job 4 : Alertes critiques ────────────────────────────
+  critical-alerts:
+    name: Critical Alerts
+    runs-on: ubuntu-latest
+    needs: analyze-resources
+    if: needs.analyze-resources.outputs.critical_vms != '[]'
+   
+    steps:
+      - name: Send Critical Alert
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          custom_payload: |
+            {
+              "text": "🚨 CRITICAL ALERT - Infrastructure",
+              "attachments": [{
+                "color": "danger",
+                "title": "VMs in Critical State",
+                "text": "VMs nécessitant une intervention immédiate:\n${{ needs.analyze-resources.outputs.critical_vms }}",
+                "fields": [
+                  {
+                    "title": "Action Required",
+                    "value": "Check Zabbix dashboard immediately",
+                    "short": false
+                  }
+                ]
+              }]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
