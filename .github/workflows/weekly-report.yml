@@ -1,0 +1,165 @@
+# weekly-report.yml
+# Génère et envoie un rapport complet chaque lundi à 8h
+
+name: Weekly Infrastructure Report
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'  # Lundi 8h
+  workflow_dispatch:
+
+jobs:
+  generate-report:
+    name: Generate Weekly Report
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: pip install requests jinja2
+
+      - name: Generate Report
+        run: |
+          cat > /tmp/weekly_report.py << 'PYTHON'
+          import requests
+          import json
+          import os
+          from datetime import datetime, timedelta
+
+          ZABBIX_URL      = os.environ.get("ZABBIX_URL")
+          ZABBIX_USER     = os.environ.get("ZABBIX_USER")
+          ZABBIX_PASSWORD = os.environ.get("ZABBIX_PASSWORD")
+          PROXMOX_HOST    = os.environ.get("PROXMOX_HOST")
+          PROXMOX_TOKEN   = os.environ.get("PROXMOX_TOKEN")
+
+          def zabbix_login():
+              r = requests.post(f"{ZABBIX_URL}/api_jsonrpc.php", json={
+                  "jsonrpc": "2.0",
+                  "method": "user.login",
+                  "params": {
+                      "username": ZABBIX_USER,
+                      "password": ZABBIX_PASSWORD
+                  },
+                  "id": 1
+              })
+              return r.json()["result"]
+
+          def get_proxmox_status():
+              """Statut du nœud Proxmox"""
+              headers = {
+                  "Authorization": f"PVEAPIToken={PROXMOX_TOKEN}"
+              }
+              r = requests.get(
+                  f"https://{PROXMOX_HOST}:8006/api2/json/nodes",
+                  headers=headers,
+                  verify=False
+              )
+              return r.json()["data"]
+
+          def get_weekly_problems(token):
+              """Problèmes de la semaine depuis Zabbix"""
+              time_from = int(
+                  (datetime.now() - timedelta(days=7)).timestamp()
+              )
+              r = requests.post(f"{ZABBIX_URL}/api_jsonrpc.php", json={
+                  "jsonrpc": "2.0",
+                  "method": "problem.get",
+                  "params": {
+                      "output"   : "extend",
+                      "time_from": time_from,
+                      "recent"   : False,
+                      "sortfield": ["eventid"],
+                      "sortorder": "DESC",
+                      "limit"    : 50
+                  },
+                  "auth": token,
+                  "id": 5
+              })
+              return r.json().get("result", [])
+
+          def get_vms_status(token):
+              """Statut de toutes les VMs"""
+              r = requests.post(f"{ZABBIX_URL}/api_jsonrpc.php", json={
+                  "jsonrpc": "2.0",
+                  "method": "host.get",
+                  "params": {
+                      "output"          : ["host", "name", "available"],
+                      "selectInterfaces": ["ip"],
+                      "filter"          : {"status": 0}
+                  },
+                  "auth": token,
+                  "id": 6
+              })
+              return r.json().get("result", [])
+
+          # ── Générer le rapport ───────────────────────────
+          token    = zabbix_login()
+          proxmox  = get_proxmox_status()
+          problems = get_weekly_problems(token)
+          vms      = get_vms_status(token)
+
+          # Statut disponibilité VMs
+          available     = sum(1 for v in vms if v["available"] == "1")
+          unavailable   = sum(1 for v in vms if v["available"] == "0")
+          total_vms     = len(vms)
+
+          report = f"""
+           *Weekly Infrastructure Report*
+           Week of {datetime.now().strftime('%Y-%m-%d')}
+          {'='*50}
+
+          *Proxmox Node Status*
+          """
+
+          for node in proxmox:
+              cpu_pct  = round(node.get('cpu', 0) * 100, 1)
+              mem_used = round(node.get('mem', 0) / 1024**3, 1)
+              mem_max  = round(node.get('maxmem', 0) / 1024**3, 1)
+              mem_pct  = round(mem_used / mem_max * 100, 1) \
+                         if mem_max > 0 else 0
+
+              report += f"""
+          Node    : {node['node']}
+          Status  : {node['status']}
+          CPU     : {cpu_pct}%
+          Memory  : {mem_used}GB / {mem_max}GB ({mem_pct}%)
+          Uptime  : {round(node.get('uptime',0)/3600/24, 1)} days
+          """
+
+          report += f"""
+          {'='*50}
+          *VMs & LXC Status*
+          Total     : {total_vms}
+          Available : {available} 
+          Unreachable: {unavailable} 
+
+          {'='*50}
+          *Problems this week: {len(problems)}*
+          """
+
+          for p in problems[:10]:  # Top 10 problèmes
+              report += f"- {p.get('name', 'Unknown')}\n"
+
+          # Sauvegarder le rapport
+          with open("/tmp/weekly_report.txt", "w") as f:
+              f.write(report)
+
+          print(report)
+          PYTHON
+          python3 /tmp/weekly_report.py
+
+      - name: Send Weekly Report to Slack
+        run: |
+          REPORT=$(cat /tmp/weekly_report.txt)
+          curl -X POST \
+            -H 'Content-type: application/json' \
+            --data "{\"text\": \"$REPORT\"}" \
+            ${{ secrets.SLACK_WEBHOOK }}
+        env:
+          ZABBIX_URL      : ${{ env.ZABBIX_URL }}
+          ZABBIX_USER     : ${{ env.ZABBIX_USER }}
+          ZABBIX_PASSWORD : ${{ env.ZABBIX_PASSWORD }}
+          PROXMOX_HOST    : ${{ secrets.PROXMOX_HOST }}
+          PROXMOX_TOKEN   : ${{ secrets.PROXMOX_API_TOKEN }}

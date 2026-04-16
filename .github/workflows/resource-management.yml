@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       vm_name:
-        description: 'VM to scale (ex: vm-web-01)'
+        description: 'VM to scale'
         required: false
       action:
         description: 'Action (analyze/scale-up/scale-down)'
@@ -29,7 +29,7 @@ env:
   PROXMOX_TOKEN: ${{ secrets.PROXMOX_API_TOKEN }}
 
 jobs:
-  # ── Job 1 : Analyser les métriques Zabbix ───────────────
+  # Job 1 : Analyser les métriques Zabbix
   analyze-resources:
     name: Analyze Zabbix Metrics
     runs-on: ubuntu-latest
@@ -313,7 +313,7 @@ jobs:
           ZABBIX_USER: ${{ env.ZABBIX_USER }}
           ZABBIX_PASSWORD: ${{ env.ZABBIX_PASSWORD }}
 
-  # ── Job 2 : Scale Up ─────────────────────────────────────
+  #Job 2 : Scale Up
   scale-up:
     name: Scale Up Resources
     runs-on: ubuntu-latest
@@ -422,7 +422,7 @@ jobs:
             git commit -m "auto-scale: scale up resources $(date +%Y-%m-%d)"
           git push
 
-  # ── Job 3 : Scale Down ───────────────────────────────────
+  #Job 3 : Scale Down
   scale-down:
     name: Scale Down Resources
     runs-on: ubuntu-latest
@@ -523,7 +523,7 @@ jobs:
             git commit -m "auto-scale: scale down resources $(date +%Y-%m-%d)"
           git push
 
-  # ── Job 4 : Alertes critiques ────────────────────────────
+  # Job 4 : Alertes critiques
   critical-alerts:
     name: Critical Alerts
     runs-on: ubuntu-latest
@@ -537,7 +537,7 @@ jobs:
           status: custom
           custom_payload: |
             {
-              "text": "🚨 CRITICAL ALERT - Infrastructure",
+              "text": " CRITICAL ALERT - Infrastructure",
               "attachments": [{
                 "color": "danger",
                 "title": "VMs in Critical State",

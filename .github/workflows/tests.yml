@@ -1,0 +1,201 @@
+name: Test Infrastructure
+
+on:
+  workflow_run:
+    workflows: ["Configure Infrastructure"]
+    types:
+      - completed
+  workflow_dispatch:
+
+jobs:
+  # ── Job 1 : Tests Linux ──────────────────────────────────
+  test-linux:
+    name: Test Linux Services
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          cat > ~/.ssh/config << EOF
+          Host *
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+          EOF
+
+      # Test DNS
+      - name: Test DNS Service
+        run: |
+          echo "Testing DNS server..."
+          # Vérifier que le port 53 est ouvert
+          nc -zv 172.19.14.85 53
+          # Résoudre un nom de domaine
+          dig @172.19.14.85 google.com +short
+          # Vérifier la réponse
+          if dig @172.19.14.85 google.com | grep -q "ANSWER"; then
+            echo " DNS: OK"
+          else
+            echo " DNS: FAILED"
+            exit 1
+          fi
+
+      # Test NFS
+      - name: Test NFS Service
+        run: |
+          echo "Testing NFS server..."
+          sudo apt-get install -y nfs-common -qq
+          # Vérifier les exports NFS
+          showmount -e 172.19.14.87
+          if showmount -e 172.19.14.87 | grep -q "/"; then
+            echo " NFS: OK"
+          else
+            echo " NFS: FAILED"
+            exit 1
+          fi
+
+      # Test Web
+      - name: Test Web Service
+        run: |
+          echo "Testing Web server..."
+          # Vérifier HTTP
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            http://172.19.14.54)
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo " Web HTTP: OK (200)"
+          else
+            echo " Web HTTP: FAILED (got $HTTP_CODE)"
+            exit 1
+          fi
+
+      # Test Database
+      - name: Test Database Service
+        run: |
+          echo "Testing Database server..."
+          # Vérifier que le port MySQL/MariaDB est ouvert
+          nc -zv 172.19.14. 3306
+          if [ $? -eq 0 ]; then
+            echo "Database port: OK"
+          else
+            echo "Database port: FAILED"
+            exit 1
+          fi
+
+      # Test SSH sur toutes les VMs Linux
+      - name: Test SSH Connectivity
+        run: |
+          echo "Testing SSH on all Linux VMs..."
+          VMS=(
+            "172.19.14.105"  # vm-admin
+            "172.19.14.41"   # vm-veeam
+          )
+          for VM in "${VMS[@]}"; do
+            RESULT=$(ssh -o ConnectTimeout=5 \
+              sysadmin@$VM "echo OK" 2>&1)
+            if [ "$RESULT" = "OK" ]; then
+              echo " SSH $VM: OK"
+            else
+              echo " SSH $VM: FAILED"
+            fi
+          done
+
+      # Test agents Zabbix
+      - name: Test Zabbix Agents
+        run: |
+          echo "Testing Zabbix agents..."
+          # Vérifier port Zabbix agent (10050)
+          VMS=(
+            "172.19.14.105"
+            "172.19.14.41"
+          )
+          for VM in "${VMS[@]}"; do
+            nc -zv $VM 10050
+            if [ $? -eq 0 ]; then
+              echo " Zabbix agent $VM: OK"
+            else
+              echo " Zabbix agent $VM: FAILED"
+            fi
+          done
+
+  # ── Job 2 : Tests Windows ────────────────────────────────
+  test-windows:
+    name: Test Windows Services
+    runs-on: ubuntu-latest
+    needs: test-linux
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Test Active Directory
+      - name: Test Active Directory
+        run: |
+          echo "Testing Active Directory..."
+          # Vérifier port LDAP (389)
+          nc -zv 172.19.14.x 389
+          if [ $? -eq 0 ]; then
+            echo " AD LDAP port: OK"
+          else
+            echo " AD LDAP port: FAILED"
+            exit 1
+          fi
+          # Vérifier port Kerberos (88)
+          nc -zv 172.19.14.x 88
+          if [ $? -eq 0 ]; then
+            echo " AD Kerberos port: OK"
+          else
+            echo " AD Kerberos port: FAILED"
+          fi
+
+      # Test WDS
+      - name: Test WDS Service
+        run: |
+          echo "Testing WDS..."
+          # Vérifier port WDS (4011)
+          nc -zv 172.19.14.x 4011
+          if [ $? -eq 0 ]; then
+            echo " WDS port: OK"
+          else
+            echo " WDS port: FAILED"
+          fi
+
+      # Test WinRM (pour Ansible)
+      - name: Test WinRM
+        run: |
+          echo "Testing WinRM on Windows VMs..."
+          WINDOWS_VMS=(
+            "172.19.14.87"  # vm-ad
+            "172.19.14.56"  # vm-wds
+            "172.19.14.41" # vm-veeam
+          )
+          for VM in "${WINDOWS_VMS[@]}"; do
+            nc -zv $VM 5985
+            if [ $? -eq 0 ]; then
+              echo " WinRM $VM: OK"
+            else
+              echo " WinRM $VM: FAILED"
+            fi
+          done
+
+  # ── Job 3 : Rapport des tests ────────────────────────────
+  test-report:
+    name: Test Report
+    runs-on: ubuntu-latest
+    needs: [test-linux, test-windows]
+    if: always()
+    # always() = s'exécute même si les tests échouent
+
+    steps:
+      - name: Generate Report
+        run: |
+          echo "================================"
+          echo "🧪 Infrastructure Test Report"
+          echo "Date: $(date)"
+          echo "================================"
+          echo "Linux Tests  : ${{ needs.test-linux.result }}"
+          echo "Windows Tests: ${{ needs.test-windows.result }}"
+          echo "================================"

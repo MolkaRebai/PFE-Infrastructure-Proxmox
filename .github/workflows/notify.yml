@@ -1,0 +1,87 @@
+name: Notifications
+
+on:
+  workflow_run:
+    workflows:
+      - "Validate"
+      - "Deploy Infrastructure"
+      - "Configure Infrastructure"
+      - "Test Infrastructure"
+      - "Resource Management"
+    types:
+      - completed
+
+jobs:
+  notify:
+    name: Send Notification
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Notify Success
+        if: github.event.workflow_run.conclusion == 'success'
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          custom_payload: |
+            {
+              "text": " Pipeline Success",
+              "attachments": [{
+                "color": "good",
+                "fields": [
+                  {
+                    "title": "Workflow",
+                    "value": "${{ github.event.workflow_run.name }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Branch",
+                    "value": "${{ github.event.workflow_run.head_branch }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Triggered by",
+                    "value": "${{ github.event.workflow_run.actor.login }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Duration",
+                    "value": "${{ github.event.workflow_run.run_started_at }}",
+                    "short": true
+                  }
+                ]
+              }]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+
+      - name: Notify Failure
+        if: github.event.workflow_run.conclusion == 'failure'
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          custom_payload: |
+            {
+              "text": "Pipeline Failed",
+              "attachments": [{
+                "color": "danger",
+                "fields": [
+                  {
+                    "title": "Workflow",
+                    "value": "${{ github.event.workflow_run.name }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Branch",
+                    "value": "${{ github.event.workflow_run.head_branch }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Logs",
+                    "value": "${{ github.event.workflow_run.html_url }}",
+                    "short": false
+                  }
+                ]
+              }]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}

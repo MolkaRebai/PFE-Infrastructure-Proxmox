@@ -1,0 +1,127 @@
+name: Configure Infrastructure
+
+on:
+  # Déclenché automatiquement après deploy.yml
+  workflow_run:
+    workflows: ["Deploy Infrastructure"]
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Target hosts (all, linux, windows)'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - linux
+          - windows
+
+jobs:
+  # ── Job 1 : Configure Ubuntu Server ─────────────────────
+  configure-linux:
+    name: Configure Ubuntu Servers
+    runs-on: ubuntu-latest
+    if: >
+      github.event.workflow_run.conclusion == 'success' ||
+      github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Ansible
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ansible sshpass
+          # sshpass = permet SSH avec mot de passe
+          # si pas de clé SSH configurée
+
+      # Configurer la clé SSH
+      - name: Setup SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          # chmod 600 = lecture seule par le propriétaire
+          # OBLIGATOIRE pour SSH
+
+          # Désactiver la vérification des hosts
+          cat > ~/.ssh/config << EOF
+          Host *
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+          EOF
+          # StrictHostKeyChecking no = pas de prompt
+          # "Are you sure you want to connect?"
+
+      # Tester la connectivité avant de configurer
+      - name: Test Connectivity
+        run: |
+          ansible all \
+            -i ansible/inventory/ \
+            -m ping \
+            --limit linux
+          # -m ping = module ping Ansible
+          # Vérifie que toutes les VMs Linux répondent
+          # avant de lancer la configuration
+
+      # Configurer les services communs
+      - name: Configure Common
+        run: |
+          ansible-playbook \
+            -i ansible/inventory/ \
+            ansible/playbooks/setup_common.yml \
+            --limit linux \
+            -v
+          # setup_common.yml = configuration de base
+          # - mise à jour des paquets
+          # - configuration NTP
+          # - configuration firewall UFW
+          # - création des utilisateurs
+          # -v = verbose (plus de détails dans les logs)
+
+      # Configurer les services spécifiques
+      - name: Configure Services
+        run: |
+          # DNS
+          ansible-playbook \
+            -i ansible/inventory/ \
+            ansible/playbooks/setup_lxc_dns.yml \
+            -v
+
+          # NFS
+          ansible-playbook \
+            -i ansible/inventory/ \
+            ansible/playbooks/setup_lxc_nfs.yml \
+            -v
+
+          # Web
+          ansible-playbook \
+            -i ansible/inventory/ \
+            ansible/playbooks/setup_vm_web.yml \
+            -v
+
+          # Database
+          ansible-playbook \
+            -i ansible/inventory/ \
+            ansible/playbooks/setup_vm_db.yml \
+            -v
+
+          # App
+          ansible-playbook \
+            -i ansible/inventory/ \
+            ansible/playbooks/setup_lxc_app.yml \
+            -v
+
+      # Installer les agents Zabbix sur toutes les VMs Linux
+      - name: Install Zabbix Agents
+        run: |
+          ansible-playbook \
+            -i ansible/inventory/ \
+            ansible/playbooks/setup_zabbix_agents.yml \
+            --limit linux \
+            -v
