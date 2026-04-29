@@ -39,17 +39,11 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          # chmod 600 = lecture seule par le propriétaire
-          # OBLIGATOIRE pour SSH
-
-          # Désactiver la vérification des hosts
           cat > ~/.ssh/config << EOF
           Host *
             StrictHostKeyChecking no
             UserKnownHostsFile /dev/null
           EOF
-          # StrictHostKeyChecking no = pas de prompt
-          # "Are you sure you want to connect?"
 
       # Tester la connectivité avant de configurer
       - name: Test Connectivity
@@ -59,63 +53,61 @@ jobs:
             -i ansible/inventory/ \
             -m ping \
             --limit all_machines
-          # -m ping = module ping Ansible
-          # Vérifie que toutes les VMs Linux répondent
-          # avant de lancer la configuration
 
-      # Configurer les services communs
-      - name: Configure Common
+      # Configurer les services communs (dry-run)
+      - name: Configure Common (dry-run)
         run: |
           ansible-playbook \
             -i ansible/inventory/ \
             ansible/playbooks/setup_common.yml \
             --limit all_machines \
+            --check \
             -v
-          # setup_common.yml = configuration de base
-          # - mise à jour des paquets
-          # - configuration NTP
-          # - configuration firewall UFW
-          # - création des utilisateurs
-          # -v = verbose (plus de détails dans les logs)
 
-      # Configurer les services spécifiques
-      - name: Configure Services
+      # Configurer les services spécifiques (dry-run)
+      - name: Configure Services (dry-run)
         run: |
           # DNS
           ansible-playbook \
             -i ansible/inventory/ \
             ansible/playbooks/setup_lxc_dns.yml \
+            --check \
             -v
 
           # NFS
           ansible-playbook \
             -i ansible/inventory/ \
             ansible/playbooks/setup_lxc_nfs.yml \
+            --check \
             -v
 
           # Web
           ansible-playbook \
             -i ansible/inventory/ \
             ansible/playbooks/setup_vm_web.yml \
+            --check \
             -v
 
           # Database
           ansible-playbook \
             -i ansible/inventory/ \
             ansible/playbooks/setup_vm_db.yml \
+            --check \
             -v
 
           # App
           ansible-playbook \
             -i ansible/inventory/ \
             ansible/playbooks/setup_lxc_app.yml \
+            --check \
             -v
 
-      # Installer les agents Zabbix sur toutes les VMs Linux
-      - name: Install Zabbix Agents
+      # Installer les agents Zabbix (dry-run)
+      - name: Install Zabbix Agents (dry-run)
         run: |
           ansible-playbook \
             -i ansible/inventory/ \
             ansible/playbooks/setup_zabbix_agents.yml \
             --limit all_machines \
+            --check \
             -v
