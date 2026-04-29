@@ -12,7 +12,7 @@ jobs:
   test-linux:
     name: Test Linux Services
     continue-on-error: true
-
+    if: always()
     runs-on: self-hosted
 
     steps:
@@ -33,14 +33,15 @@ jobs:
       # Test DNS
       - name: Test DNS Service
         continue-on-error: true
+        if: always()
         run: |
           echo "Testing DNS server..."
           # Vérifier que le port 53 est ouvert
-          nc -zv 172.19.14.85 53
+          nc -zv 172.19.14.107 53
           # Résoudre un nom de domaine
           dig @172.19.14.85 google.com +short
           # Vérifier la réponse
-          if dig @172.19.14.85 google.com | grep -q "ANSWER"; then
+          if dig @172.19.14.107 google.com | grep -q "ANSWER"; then
             echo " DNS: OK"
           else
             echo " DNS: FAILED"
@@ -50,6 +51,7 @@ jobs:
       # Test NFS
       - name: Test NFS Service
         continue-on-error: true
+        if: always()
         run: |
           echo "Testing NFS server..."
           sudo apt-get install -y nfs-common -qq
@@ -65,6 +67,7 @@ jobs:
       # Test Web
       - name: Test Web Service
         continue-on-error: true
+        if: always()
         run: |
           echo "Testing Web server..."
           # Vérifier HTTP
@@ -80,6 +83,7 @@ jobs:
       # Test Database
       - name: Test Database Service
         continue-on-error: true
+        if: always()
         run: |
           echo "Testing Database server..."
           # Vérifier que le port MySQL/MariaDB est ouvert
@@ -94,6 +98,7 @@ jobs:
       # Test SSH sur toutes les VMs Linux
       - name: Test SSH Connectivity
         continue-on-error: true
+        if: always()
         run: |
           echo "Testing SSH on all Linux VMs..."
           VMS=(
@@ -113,6 +118,7 @@ jobs:
       # Test agents Zabbix
       - name: Test Zabbix Agents
         continue-on-error: true
+        if: always()
         run: |
           echo "Testing Zabbix agents..."
           # Vérifier port Zabbix agent (10050)
