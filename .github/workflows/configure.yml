@@ -58,7 +58,7 @@ jobs:
       - name: Configure Common (dry-run)
         continue-on-error: true
         run: |
-          ansible-playbook \
+          ansible/playbooks \
             -i ansible/inventory/ \
             ansible/playbooks/setup_common.yml \
             --limit all_machines \
@@ -70,35 +70,35 @@ jobs:
         continue-on-error: true
         run: |
           # DNS
-          ansible-playbook \
+          ansible/playbooks \
             -i ansible/inventory/ \
             ansible/playbooks/setup_lxc_dns.yml \
             --check \
             -v
 
           # NFS
-          ansible-playbook \
+          ansible/playbooks \
             -i ansible/inventory/ \
             ansible/playbooks/setup_lxc_nfs.yml \
             --check \
             -v
 
           # Web
-          ansible-playbook \
+          ansible/playbooks \
             -i ansible/inventory/ \
             ansible/playbooks/setup_vm_web.yml \
             --check \
             -v
 
           # Database
-          ansible-playbook \
+          ansible/playbooks \
             -i ansible/inventory/ \
             ansible/playbooks/setup_vm_db.yml \
             --check \
             -v
 
           # App
-          ansible-playbook \
+          ansible/playbooks \
             -i ansible/inventory/ \
             ansible/playbooks/setup_lxc_app.yml \
             --check \
@@ -108,7 +108,7 @@ jobs:
       - name: Install Zabbix Agents (dry-run)
         continue-on-error: true
         run: |
-          ansible-playbook \
+          ansible/playbooks \
             -i ansible/inventory/ \
             ansible/playbooks/setup_zabbix_agents.yml \
             --limit all_machines \
