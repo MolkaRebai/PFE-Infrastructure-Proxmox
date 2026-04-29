@@ -64,7 +64,7 @@ jobs:
           ansible all \
             -i ansible/inventory/ \
             -m ping \
-            --limit all_macines
+            --limit all_machines
           # -m ping = module ping Ansible
           # Vérifie que toutes les VMs Linux répondent
           # avant de lancer la configuration
@@ -123,5 +123,5 @@ jobs:
           ansible-playbook \
             -i ansible/inventory/ \
             ansible/playbooks/setup_zabbix_agents.yml \
-            --limit machines \
+            --limit all_machines \
             -v
