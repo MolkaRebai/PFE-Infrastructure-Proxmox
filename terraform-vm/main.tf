@@ -1,5 +1,5 @@
 # ── Création de toutes les VMs ────────────────────────────────────────────────
-resource "proxmox_virtual_environment_vm""vms" {
+resource "proxmox_virtual_environment_vm" "vms" {
   for_each = var.vms   # boucle sur chaque VM définie dans vms.auto.tfvars
   # Empêche les clones parallèles
   depends_on = []
