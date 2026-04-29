@@ -43,7 +43,6 @@ jobs:
           # -out=tfplan-vm   = sauvegarde le plan
           # -no-color        = pas de couleurs ANSI
           # tee              = affiche ET sauvegarde
-        working-directory: terraform-vm
 
       # Poster le plan en commentaire sur la PR
       - name: Comment PR with VM Plan
@@ -86,7 +85,7 @@ jobs:
         run: terraform init
         working-directory: terraform-lxc
 
-      -  name: Terraform Plan LXC
+      - name: Terraform Plan LXC
         run: terraform plan -out=tfplan-lxc -no-color | Tee-Object -FilePath plan-output-lxc.txt
         working-directory: terraform-lxc
 

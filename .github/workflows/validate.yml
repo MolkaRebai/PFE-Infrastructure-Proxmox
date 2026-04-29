@@ -1,5 +1,9 @@
 name: Validate
 
+# MODE TEST : ce fichier est 100% safe
+# terraform fmt/validate et ansible --syntax-check
+# ne touchent RIEN a l'infrastructure
+
 on:
   push:
     branches:
@@ -9,42 +13,37 @@ on:
   pull_request:
     branches:
       - main
+  # Permet de lancer manuellement depuis GitHub Actions
+  workflow_dispatch:
 
 jobs:
-  # Job 1 : Validation Terraform VM
   validate-terraform-vm:
     name: Validate Terraform VM
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Télécharger le code depuis GitHub
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. Installer Terraform
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.9.0"
+          terraform_version: "1.14.6"
 
-      # 3. Initialiser Terraform (sans backend)
+      # -backend=false = pas de connexion au backend Terraform
+      # pas besoin de credentials Proxmox pour valider
       - name: Terraform Init VM
         run: terraform init -backend=false
         working-directory: terraform-vm
-      
 
-      # 4. Vérifier le formatage du code
       - name: Terraform Format Check VM
         run: terraform fmt -check -recursive
         working-directory: terraform-vm
-        
-      # 5. Valider la syntaxe HCL
+
       - name: Terraform Validate VM
         run: terraform validate
         working-directory: terraform-vm
-        
 
-  # ── Job 2 : Validation Terraform LXC ────────────────────
   validate-terraform-lxc:
     name: Validate Terraform LXC
     runs-on: ubuntu-latest
@@ -56,7 +55,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.9.0"
+          terraform_version: "1.14.6"
 
       - name: Terraform Init LXC
         run: terraform init -backend=false
@@ -70,7 +69,6 @@ jobs:
         run: terraform validate
         working-directory: terraform-lxc
 
-  # ── Job 3 : Validation Ansible ───────────────────────────
   validate-ansible:
     name: Validate Ansible
     runs-on: ubuntu-latest
@@ -79,23 +77,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Installer Python + Ansible + ansible-lint
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install Ansible and Lint
-        run: |
-          pip install ansible ansible-lint
-          # ansible      = outil de configuration
-          # ansible-lint = vérifie les bonnes pratiques
-          # Exemple de règles vérifiées :
-          # - Pas de mot de passe en clair
-          # - Tâches avec un nom (name:)
-          # - Modules à jour (pas dépréciés)
+        run: pip install ansible ansible-lint
 
-      # Vérifier la syntaxe des playbooks
+      # --syntax-check = verifie uniquement la syntaxe YAML/Ansible
+      # n'execute aucune tache sur les VMs
       - name: Ansible Syntax Check
         run: |
           for playbook in ansible/playbooks/*.yml; do
@@ -104,14 +95,11 @@ jobs:
               -i ansible/inventory/ \
               "$playbook"
           done
-        
 
-      # Linter Ansible
       - name: Ansible Lint
         run: ansible-lint ansible/playbooks/
         continue-on-error: true
 
-  #Job 4 : Résumé final
   validate-summary:
     name: Validation Summary
     runs-on: ubuntu-latest
@@ -124,8 +112,8 @@ jobs:
       - name: Summary
         run: |
           echo "================================"
-          echo " Terraform VM     : Valid"
-          echo " Terraform LXC    : Valid"
-          echo " Ansible Playbooks: Valid"
+          echo " Terraform VM     : ${{ needs.validate-terraform-vm.result }}"
+          echo " Terraform LXC    : ${{ needs.validate-terraform-lxc.result }}"
+          echo " Ansible Playbooks: ${{ needs.validate-ansible.result }}"
           echo "================================"
           echo "Code is ready for deployment!"

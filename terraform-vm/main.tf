@@ -1,46 +1,97 @@
 # ── Création de toutes les VMs ────────────────────────────────────────────────
 resource "proxmox_virtual_environment_vm" "vms" {
-  for_each = var.vms # boucle sur chaque VM définie dans vms.auto.tfvars
+  for_each = var.vms   # boucle sur chaque VM définie dans vms.auto.tfvars
   # Empêche les clones parallèles
   depends_on = []
   # Identité
+resource "proxmox_virtual_environment_vm" "vms" {
+  for_each  = var.vms
   node_name = var.proxmox_node
   vm_id     = each.value.vm_id
-  name      = each.key # clé de la map = nom de la VM
+  name      = each.key
   tags      = ["terraform", each.value.os]
 
-  # Clone depuis le template correspondant à l'OS choisi
   clone {
     vm_id = var.os_templates[each.value.os]
     full  = true
   }
 
-  # CPU
+  #UEFI — Windows uniquement
+  bios = each.value.os_type == "win10" ? "ovmf" : "seabios"
+
+  dynamic "efi_disk" {
+    for_each = each.value.os_type == "win10" ? [1] : []
+    content {
+      datastore_id = var.storage_vm
+      file_format  = "raw"
+      type         = "4m"
+    }
+  }
+
+  dynamic "tpm_state" {
+    for_each = each.value.os_type == "win10" ? [1] : []
+    content {
+      datastore_id = var.storage_vm
+      version      = "v2.0"
+    }
+  }
+
   cpu {
     cores   = each.value.cpu
     sockets = 1
-    type    = "x86-64-v2-AES"
+    type    = "kvm64"
   }
 
-  # RAM
   memory {
     dedicated = each.value.ram_mb
+    floating  = 0
   }
 
-  # Disque
-  disk {
-    interface    = "virtio0"
-    size         = each.value.disk_gb
-    datastore_id = var.storage_vm
+  # Disque — IDE pour Windows, VirtIO pour Linux
+  dynamic "disk" {
+    for_each = each.value.os_type == "win10" ? [1] : []
+    content {
+      interface    = "ide0"
+      size         = each.value.disk_gb
+      datastore_id = var.storage_vm
+      file_format  = "raw"
+    }
   }
 
-  # Réseau
+  dynamic "disk" {
+    for_each = each.value.os_type == "l26" ? [1] : []
+    content {
+      interface    = "virtio0"
+      size         = each.value.disk_gb
+      datastore_id = var.storage_vm
+      file_format  = "raw"
+      cache        = "none"
+      aio          = "io_uring"
+      discard      = "ignore"
+      backup       = true
+      replicate    = true
+    }
+  }
+
+  #Boot order corrigé — ide0 pour Windows, virtio0 pour Linux
+  boot_order = each.value.os_type == "win10" ? ["ide0"] : ["virtio0"]
+
+  #CD-ROM VirtIO — Windows uniquement
+  dynamic "cdrom" {
+    for_each = each.value.os_type == "win10" ? [1] : []
+    content {
+      file_id   = "NAS-ISO:iso/virtio-win.iso"
+      interface = "ide1"
+    }
+  }
+
+  #Réseau
   network_device {
     bridge = var.default_bridge
     model  = "virtio"
   }
 
-  # Cloud-Init : configure IP + user au premier démarrage
+  #Cloud-Init — Linux uniquement
   dynamic "initialization" {
     for_each = each.value.os_type == "l26" ? [1] : []
     content {
@@ -60,6 +111,7 @@ resource "proxmox_virtual_environment_vm" "vms" {
     }
   }
 
+  #OS type dynamique
   operating_system {
     type = each.value.os_type
   }
@@ -71,32 +123,4 @@ resource "proxmox_virtual_environment_vm" "vms" {
   lifecycle {
     ignore_changes = [clone]
   }
-}
-# Génération automatique de l'inventory Ansible
-# Crée le fichier inventory.ini après la création des VMs
-resource "local_file" "ansible_inventory" {
-  filename = "${path.module}/../ansible/inventory/vms.ini"
-
-  content = templatefile("${path.module}/inventory.tpl", {
-    vms          = { for name, vm in var.vms : name => vm if vm.os_type == "l26" }
-    admin_user   = var.admin_user
-    ssh_key_path = var.ssh_private_key_path
-  })
-
-  depends_on = [proxmox_virtual_environment_vm.vms]
-}
-
-#Génération des variables Ansible par VM
-resource "local_file" "ansible_vars" {
-  filename = "${path.module}/../ansible/group_vars/all.yml"
-
-  content = templatefile("${path.module}/ansible_vars.tpl", {
-    vms         = { for name, vm in var.vms : name => vm if vm.os_type == "l26" }
-    admin_user  = var.admin_user
-    ssh_pub_key = var.ssh_public_key
-    gateway     = var.default_gateway
-    dns         = var.default_dns
-  })
-
-  depends_on = [proxmox_virtual_environment_vm.vms]
 }
