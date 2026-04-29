@@ -24,7 +24,7 @@ jobs:
   # ── Job 1 : Configure Ubuntu Server ─────────────────────
   configure-linux:
     name: Configure Ubuntu Servers
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     if: >
       github.event.workflow_run.conclusion == 'success' ||
       github.event_name == 'workflow_dispatch'
@@ -32,13 +32,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Install Ansible
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y ansible sshpass
-          # sshpass = permet SSH avec mot de passe
-          # si pas de clé SSH configurée
 
       # Configurer la clé SSH
       - name: Setup SSH Key
