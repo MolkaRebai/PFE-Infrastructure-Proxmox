@@ -79,7 +79,7 @@ variable "vm_password" {
   description = "Mot de passe des VMs Linux"
   type        = string
   sensitive   = true
-    default     ="azerty123"
+  default     = "azerty123"
 
 }
 

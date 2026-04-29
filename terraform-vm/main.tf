@@ -1,12 +1,12 @@
 # ── Création de toutes les VMs ────────────────────────────────────────────────
 resource "proxmox_virtual_environment_vm" "vms" {
-  for_each = var.vms   # boucle sur chaque VM définie dans vms.auto.tfvars
+  for_each = var.vms # boucle sur chaque VM définie dans vms.auto.tfvars
   # Empêche les clones parallèles
   depends_on = []
   # Identité
   node_name = var.proxmox_node
   vm_id     = each.value.vm_id
-  name      = each.key              # clé de la map = nom de la VM
+  name      = each.key # clé de la map = nom de la VM
   tags      = ["terraform", each.value.os]
 
   # Clone depuis le template correspondant à l'OS choisi
@@ -44,21 +44,21 @@ resource "proxmox_virtual_environment_vm" "vms" {
   dynamic "initialization" {
     for_each = each.value.os_type == "l26" ? [1] : []
     content {
-        ip_config {
-            ipv4 {
-                address = "${each.value.ip_address}/${each.value.prefix}"
-                gateway = var.default_gateway
-            }
+      ip_config {
+        ipv4 {
+          address = "${each.value.ip_address}/${each.value.prefix}"
+          gateway = var.default_gateway
         }
-        dns {
-            servers = var.default_dns
-        }
-        user_account {
-            username = var.admin_user
-            keys     = [var.ssh_public_key]
-        }
+      }
+      dns {
+        servers = var.default_dns
+      }
+      user_account {
+        username = var.admin_user
+        keys     = [var.ssh_public_key]
+      }
     }
-}
+  }
 
   operating_system {
     type = each.value.os_type
@@ -75,7 +75,7 @@ resource "proxmox_virtual_environment_vm" "vms" {
 # Génération automatique de l'inventory Ansible
 # Crée le fichier inventory.ini après la création des VMs
 resource "local_file" "ansible_inventory" {
-    filename = "${path.module}/../ansible/inventory/vms.ini"
+  filename = "${path.module}/../ansible/inventory/vms.ini"
 
   content = templatefile("${path.module}/inventory.tpl", {
     vms          = { for name, vm in var.vms : name => vm if vm.os_type == "l26" }
