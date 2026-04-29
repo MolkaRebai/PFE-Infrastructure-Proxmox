@@ -39,11 +39,7 @@ jobs:
 
       - name: Terraform Plan VM
         id: plan-vm
-        run: |
-          terraform plan \
-            -out=tfplan-vm \
-            -no-color \
-            2>&1 | tee plan-output-vm.txt
+        run: terraform plan -out=tfplan-vm -no-color 2>&1 | tee plan-output-vm.txt
           # -out=tfplan-vm   = sauvegarde le plan
           # -no-color        = pas de couleurs ANSI
           # tee              = affiche ET sauvegarde
@@ -93,10 +89,7 @@ jobs:
       - name: Terraform Plan LXC
         id: plan-lxc
         run: |
-          terraform plan \
-            -out=tfplan-lxc \
-            -no-color \
-            2>&1 | tee plan-output-lxc.txt
+          terraform plan -out=tfplan-lxc -no-color 2>&1 | tee plan-output-lxc.txt
         working-directory: terraform-lxc
 
       - name: Comment PR with LXC Plan
