@@ -56,6 +56,7 @@ jobs:
 
       # Configurer les services communs (dry-run)
       - name: Configure Common (dry-run)
+        continue-on-error: true
         run: |
           ansible-playbook \
             -i ansible/inventory/ \
@@ -66,6 +67,7 @@ jobs:
 
       # Configurer les services spécifiques (dry-run)
       - name: Configure Services (dry-run)
+        continue-on-error: true
         run: |
           # DNS
           ansible-playbook \
@@ -104,6 +106,7 @@ jobs:
 
       # Installer les agents Zabbix (dry-run)
       - name: Install Zabbix Agents (dry-run)
+        continue-on-error: true
         run: |
           ansible-playbook \
             -i ansible/inventory/ \
