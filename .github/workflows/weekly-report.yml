@@ -183,7 +183,7 @@ jobs:
 
           vm_rows = ""
           for vm in vms:
-              avail      = vm["available"]
+              avail      = vm.get("available", "0")
               avail_text = "En ligne"    if avail == "1" else "Hors ligne"
               avail_color= "#27ae60"     if avail == "1" else "#e74c3c"
               ip         = vm.get("interfaces", [{}])[0].get("ip", "N/A")
