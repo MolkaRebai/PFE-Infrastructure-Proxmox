@@ -293,7 +293,7 @@ jobs:
                       critical_vms.append(analysis["name"])
 
               # Écrire les outputs GitHub Actions
-                with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
                   f.write(f"scale_up_vms={json.dumps(scale_up_vms)}\n")
                   f.write(f"scale_down_vms={json.dumps(scale_down_vms)}\n")
                   f.write(f"critical_vms={json.dumps(critical_vms)}\n")
