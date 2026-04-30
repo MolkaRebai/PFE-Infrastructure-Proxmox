@@ -46,7 +46,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install requests pandas jinja2
+          pip3 install requests pandas jinja2
           # requests = appels API HTTP
           # pandas   = analyse des données
           # jinja2   = templates pour rapports
