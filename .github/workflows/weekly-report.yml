@@ -8,9 +8,9 @@ on:
 jobs:
   generate-report:
     name: Generate Weekly Report
-    runs-on: self-hosted   # ✅ Runner local qui voit 172.19.14.52
+    runs-on: self-hosted
 
-    env:                   # ✅ Déclaré au niveau job
+    env:
       ZABBIX_URL:      "http://172.19.14.52/zabbix"
       ZABBIX_USER:     "Admin"
       ZABBIX_PASSWORD: ${{ secrets.MDP_ZABBIX }}
@@ -22,20 +22,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: pip install requests jinja2
-
-      # ✅ Debug : vérifier que les variables arrivent bien
-      - name: Debug env vars
-        run: |
-          echo "ZABBIX_URL=$ZABBIX_URL"
-          echo "ZABBIX_USER=$ZABBIX_USER"
-          echo "PROXMOX_HOST=$PROXMOX_HOST"
-          # Ne jamais afficher les mots de passe
+        run: pip3 install requests jinja2
 
       - name: Generate Report
         run: |
-          python3 /tmp/weekly_report.py
-        # ... reste du workflow inchangé
           cat > /tmp/weekly_report.py << 'PYTHON'
           import requests
           import json
@@ -48,7 +38,6 @@ jobs:
           PROXMOX_HOST    = os.environ.get("PROXMOX_HOST")
           PROXMOX_TOKEN   = os.environ.get("PROXMOX_TOKEN")
 
-          # ── Vérification des variables ───────────────────
           missing = [k for k, v in {
               "ZABBIX_URL"     : ZABBIX_URL,
               "ZABBIX_USER"    : ZABBIX_USER,
@@ -58,7 +47,7 @@ jobs:
           }.items() if not v]
 
           if missing:
-              print(f"❌ Variables manquantes : {missing}")
+              print(f"Variables manquantes : {missing}")
               exit(1)
 
           def zabbix_login():
@@ -119,7 +108,6 @@ jobs:
               return r.json().get("result", [])
 
           def get_host_metrics(token, hostid):
-              """CPU + RAM actuels d'un host"""
               keys = [
                   "system.cpu.util",
                   "vm.memory.util",
@@ -143,7 +131,6 @@ jobs:
                   if "memory" in item["key_"]: ram = round(val, 1)
               return cpu, ram
 
-          # ── Collecte des données ─────────────────────────
           print("Connecting to Zabbix...")
           token = zabbix_login()
 
@@ -160,11 +147,9 @@ jobs:
           unavailable = sum(1 for v in vms if v["available"] == "0")
           total_vms   = len(vms)
 
-          # ── Générer rapport HTML ─────────────────────────
           now        = datetime.now().strftime('%d/%m/%Y')
           week_start = (datetime.now() - timedelta(days=7)).strftime('%d/%m/%Y')
 
-          # Construire les lignes du tableau Proxmox
           proxmox_rows = ""
           for node in proxmox:
               cpu_pct  = round(node.get('cpu', 0) * 100, 1)
@@ -173,11 +158,9 @@ jobs:
               mem_pct  = round(mem_used / mem_max * 100, 1) if mem_max > 0 else 0
               uptime   = round(node.get('uptime', 0) / 3600 / 24, 1)
               status   = node['status']
-
               cpu_color  = "#e74c3c" if cpu_pct > 80 else "#f39c12" if cpu_pct > 60 else "#27ae60"
               mem_color  = "#e74c3c" if mem_pct > 85 else "#f39c12" if mem_pct > 70 else "#27ae60"
               stat_color = "#27ae60" if status == "online" else "#e74c3c"
-
               proxmox_rows += f"""
               <tr>
                 <td>{node['node']}</td>
@@ -198,18 +181,15 @@ jobs:
               </tr>
               """
 
-          # Construire les lignes du tableau VMs
           vm_rows = ""
           for vm in vms:
               avail      = vm["available"]
-              avail_text = "✅ En ligne"   if avail == "1" else "❌ Hors ligne"
-              avail_color= "#27ae60"       if avail == "1" else "#e74c3c"
+              avail_text = "En ligne"    if avail == "1" else "Hors ligne"
+              avail_color= "#27ae60"     if avail == "1" else "#e74c3c"
               ip         = vm.get("interfaces", [{}])[0].get("ip", "N/A")
-
               cpu, ram = get_host_metrics(token, vm["hostid"])
               cpu_color = "#e74c3c" if cpu > 80 else "#f39c12" if cpu > 60 else "#27ae60"
               ram_color = "#e74c3c" if ram > 85 else "#f39c12" if ram > 70 else "#27ae60"
-
               vm_rows += f"""
               <tr>
                 <td>{vm['name']}</td>
@@ -220,15 +200,14 @@ jobs:
               </tr>
               """
 
-          # Construire les lignes des problèmes
           problem_rows = ""
           severity_map = {
-              "0": ("Non classé",  "#95a5a6"),
-              "1": ("Info",        "#3498db"),
-              "2": ("Avertissement","#f39c12"),
-              "3": ("Moyen",       "#e67e22"),
-              "4": ("Élevé",       "#e74c3c"),
-              "5": ("Critique",    "#8e44ad"),
+              "0": ("Non classe",    "#95a5a6"),
+              "1": ("Info",          "#3498db"),
+              "2": ("Avertissement", "#f39c12"),
+              "3": ("Moyen",         "#e67e22"),
+              "4": ("Eleve",         "#e74c3c"),
+              "5": ("Critique",      "#8e44ad"),
           }
           for p in problems[:10]:
               sev   = p.get("severity", "0")
@@ -246,123 +225,43 @@ jobs:
               problem_rows = """
               <tr>
                 <td colspan="3" style="text-align:center; color:#27ae60">
-                  ✅ Aucun problème cette semaine
+                  Aucun probleme cette semaine
                 </td>
               </tr>
               """
 
-          # ── Template HTML ────────────────────────────────
           html = f"""<!DOCTYPE html>
           <html lang="fr">
           <head>
             <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Rapport Hebdomadaire Infrastructure</title>
             <style>
               * {{ margin:0; padding:0; box-sizing:border-box; }}
-              body {{
-                font-family: 'Segoe UI', Arial, sans-serif;
-                background: #f0f2f5;
-                color: #2c3e50;
-              }}
-              .wrapper {{
-                max-width: 900px;
-                margin: 30px auto;
-                background: #fff;
-                border-radius: 12px;
-                box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-                overflow: hidden;
-              }}
-              .header {{
-                background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
-                color: white;
-                padding: 40px;
-                text-align: center;
-              }}
+              body {{ font-family: Arial, sans-serif; background: #f0f2f5; color: #2c3e50; }}
+              .wrapper {{ max-width: 900px; margin: 30px auto; background: #fff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); overflow: hidden; }}
+              .header {{ background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460); color: white; padding: 40px; text-align: center; }}
               .header h1 {{ font-size: 28px; margin-bottom: 8px; }}
-              .header p  {{ opacity: 0.8; font-size: 14px; }}
-              .summary {{
-                display: flex;
-                gap: 0;
-                border-bottom: 1px solid #eee;
-              }}
-              .summary-card {{
-                flex: 1;
-                padding: 25px;
-                text-align: center;
-                border-right: 1px solid #eee;
-              }}
+              .summary {{ display: flex; border-bottom: 1px solid #eee; }}
+              .summary-card {{ flex: 1; padding: 25px; text-align: center; border-right: 1px solid #eee; }}
               .summary-card:last-child {{ border-right: none; }}
-              .summary-card .number {{
-                font-size: 36px;
-                font-weight: bold;
-                display: block;
-              }}
-              .summary-card .label {{
-                font-size: 12px;
-                color: #7f8c8d;
-                margin-top: 4px;
-              }}
-              .section {{
-                padding: 30px 40px;
-                border-bottom: 1px solid #eee;
-              }}
-              .section h2 {{
-                font-size: 18px;
-                margin-bottom: 20px;
-                color: #1a1a2e;
-                display: flex;
-                align-items: center;
-                gap: 8px;
-              }}
-              table {{
-                width: 100%;
-                border-collapse: collapse;
-                font-size: 14px;
-              }}
-              th {{
-                background: #f8f9fa;
-                padding: 12px;
-                text-align: left;
-                font-weight: 600;
-                color: #555;
-                border-bottom: 2px solid #dee2e6;
-              }}
-              td {{
-                padding: 12px;
-                border-bottom: 1px solid #f0f0f0;
-              }}
-              tr:hover td {{ background: #fafafa; }}
-              .bar-bg {{
-                background: #ecf0f1;
-                border-radius: 4px;
-                height: 8px;
-                width: 120px;
-                display: inline-block;
-                vertical-align: middle;
-                margin-right: 8px;
-              }}
-              .bar-fill {{
-                height: 100%;
-                border-radius: 4px;
-              }}
-              .footer {{
-                background: #f8f9fa;
-                padding: 20px 40px;
-                text-align: center;
-                font-size: 12px;
-                color: #7f8c8d;
-              }}
+              .summary-card .number {{ font-size: 36px; font-weight: bold; display: block; }}
+              .summary-card .label {{ font-size: 12px; color: #7f8c8d; margin-top: 4px; }}
+              .section {{ padding: 30px 40px; border-bottom: 1px solid #eee; }}
+              .section h2 {{ font-size: 18px; margin-bottom: 20px; color: #1a1a2e; }}
+              table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
+              th {{ background: #f8f9fa; padding: 12px; text-align: left; font-weight: 600; color: #555; border-bottom: 2px solid #dee2e6; }}
+              td {{ padding: 12px; border-bottom: 1px solid #f0f0f0; }}
+              .bar-bg {{ background: #ecf0f1; border-radius: 4px; height: 8px; width: 120px; display: inline-block; vertical-align: middle; margin-right: 8px; }}
+              .bar-fill {{ height: 100%; border-radius: 4px; }}
+              .footer {{ background: #f8f9fa; padding: 20px 40px; text-align: center; font-size: 12px; color: #7f8c8d; }}
             </style>
           </head>
           <body>
             <div class="wrapper">
-
               <div class="header">
-                <h1>📊 Rapport Hebdomadaire Infrastructure</h1>
+                <h1>Rapport Hebdomadaire Infrastructure</h1>
                 <p>Semaine du {week_start} au {now}</p>
               </div>
-
               <div class="summary">
                 <div class="summary-card">
                   <span class="number" style="color:#3498db">{total_vms}</span>
@@ -378,66 +277,33 @@ jobs:
                 </div>
                 <div class="summary-card">
                   <span class="number" style="color:#e67e22">{len(problems)}</span>
-                  <span class="label">Problèmes</span>
+                  <span class="label">Problemes</span>
                 </div>
               </div>
-
               <div class="section">
-                <h2>🖥️ Nœuds Proxmox</h2>
+                <h2>Noeuds Proxmox</h2>
                 <table>
-                  <thead>
-                    <tr>
-                      <th>Nœud</th>
-                      <th>Statut</th>
-                      <th>CPU</th>
-                      <th>Mémoire</th>
-                      <th>Uptime</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {proxmox_rows}
-                  </tbody>
+                  <thead><tr><th>Noeud</th><th>Statut</th><th>CPU</th><th>Memoire</th><th>Uptime</th></tr></thead>
+                  <tbody>{proxmox_rows}</tbody>
                 </table>
               </div>
-
               <div class="section">
-                <h2>🗄️ Machines Virtuelles</h2>
+                <h2>Machines Virtuelles</h2>
                 <table>
-                  <thead>
-                    <tr>
-                      <th>Nom</th>
-                      <th>IP</th>
-                      <th>Statut</th>
-                      <th>CPU</th>
-                      <th>RAM</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {vm_rows}
-                  </tbody>
+                  <thead><tr><th>Nom</th><th>IP</th><th>Statut</th><th>CPU</th><th>RAM</th></tr></thead>
+                  <tbody>{vm_rows}</tbody>
                 </table>
               </div>
-
               <div class="section">
-                <h2>⚠️ Problèmes de la semaine (Top 10)</h2>
+                <h2>Problemes de la semaine (Top 10)</h2>
                 <table>
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Sévérité</th>
-                      <th>Problème</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {problem_rows}
-                  </tbody>
+                  <thead><tr><th>Date</th><th>Severite</th><th>Probleme</th></tr></thead>
+                  <tbody>{problem_rows}</tbody>
                 </table>
               </div>
-
               <div class="footer">
-                Rapport généré automatiquement le {now} via GitHub Actions
+                Rapport genere automatiquement le {now} via GitHub Actions
               </div>
-
             </div>
           </body>
           </html>
@@ -446,7 +312,7 @@ jobs:
           with open("/tmp/weekly_report.html", "w") as f:
               f.write(html)
 
-          print("✅ Rapport HTML généré : /tmp/weekly_report.html")
+          print("Rapport HTML genere : /tmp/weekly_report.html")
           PYTHON
           python3 /tmp/weekly_report.py
 
@@ -466,5 +332,5 @@ jobs:
           password:       ${{ secrets.MAIL_PASSWORD }}
           to:             ${{ secrets.MAIL_TO }}
           from:           GitHub Actions <${{ secrets.MAIL_USERNAME }}>
-          subject:        "📊 Rapport Hebdomadaire Infrastructure - ${{ github.run_number }}"
+          subject:        "Rapport Hebdomadaire Infrastructure - ${{ github.run_number }}"
           html_body:      file:///tmp/weekly_report.html
