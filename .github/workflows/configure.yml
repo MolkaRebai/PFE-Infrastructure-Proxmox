@@ -1,13 +1,6 @@
 name: Configure Infrastructure
 
 on:
-  # Déclenché automatiquement après deploy.yml
-  workflow_run:
-    workflows: ["Deploy Infrastructure"]
-    types:
-      - completed
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       target:
@@ -21,7 +14,6 @@ on:
           - windows
 
 jobs:
-  # ── Job 1 : Configure Ubuntu Server ─────────────────────
   configure-linux:
     name: Configure Ubuntu Servers
     runs-on: self-hosted
@@ -29,7 +21,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Configurer la clé SSH
       - name: Setup SSH Key
         run: |
           mkdir -p ~/.ssh
@@ -41,7 +32,6 @@ jobs:
             UserKnownHostsFile /dev/null
           EOF
 
-      # Tester la connectivité avant de configurer
       - name: Test Connectivity
         continue-on-error: true
         run: |
@@ -50,7 +40,6 @@ jobs:
             -m ping \
             --limit all_machines
 
-      # Configurer les services communs (dry-run)
       - name: Configure Common (dry-run)
         continue-on-error: true
         run: |
@@ -61,46 +50,15 @@ jobs:
             --check \
             -v
 
-      # Configurer les services spécifiques (dry-run)
       - name: Configure Services (dry-run)
         continue-on-error: true
         run: |
-          # DNS
-          ansible-playbook \
-            -i ansible/inventory/ \
-            ansible/playbooks/setup_lxc_dns.yml \
-            --check \
-            -v
+          ansible-playbook -i ansible/inventory/ ansible/playbooks/setup_lxc_dns.yml --check -v
+          ansible-playbook -i ansible/inventory/ ansible/playbooks/setup_lxc_nfs.yml --check -v
+          ansible-playbook -i ansible/inventory/ ansible/playbooks/setup_vm_web.yml --check -v
+          ansible-playbook -i ansible/inventory/ ansible/playbooks/setup_vm_db.yml --check -v
+          ansible-playbook -i ansible/inventory/ ansible/playbooks/setup_lxc_app.yml --check -v
 
-          # NFS
-          ansible-playbook \
-            -i ansible/inventory/ \
-            ansible/playbooks/setup_lxc_nfs.yml \
-            --check \
-            -v
-
-          # Web
-          ansible-playbook \
-            -i ansible/inventory/ \
-            ansible/playbooks/setup_vm_web.yml \
-            --check \
-            -v
-
-          # Database
-          ansible-playbook \
-            -i ansible/inventory/ \
-            ansible/playbooks/setup_vm_db.yml \
-            --check \
-            -v
-
-          # App
-          ansible-playbook \
-            -i ansible/inventory/ \
-            ansible/playbooks/setup_lxc_app.yml \
-            --check \
-            -v
-
-      # Installer les agents Zabbix (dry-run)
       - name: Install Zabbix Agents (dry-run)
         continue-on-error: true
         run: |
