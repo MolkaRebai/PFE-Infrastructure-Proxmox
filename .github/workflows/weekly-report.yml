@@ -322,15 +322,3 @@ jobs:
           name: weekly-report-${{ github.run_number }}
           path: /tmp/weekly_report.html
           retention-days: 30
-
-      - name: Send Report by Email
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: ${{ secrets.MAIL_SERVER }}
-          server_port:    ${{ secrets.MAIL_PORT }}
-          username:       ${{ secrets.MAIL_USERNAME }}
-          password:       ${{ secrets.MAIL_PASSWORD }}
-          to:             ${{ secrets.MAIL_TO }}
-          from:           GitHub Actions <${{ secrets.MAIL_USERNAME }}>
-          subject:        "Rapport Hebdomadaire Infrastructure - ${{ github.run_number }}"
-          html_body:      file:///tmp/weekly_report.html
