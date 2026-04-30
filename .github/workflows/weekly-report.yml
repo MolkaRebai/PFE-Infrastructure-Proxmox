@@ -143,8 +143,8 @@ jobs:
           print("Getting VMs status...")
           vms = get_vms_status(token)
 
-          available   = sum(1 for v in vms if v["available"] == "1")
-          unavailable = sum(1 for v in vms if v["available"] == "0")
+          available   = sum(1 for v in vms if v.get("available", "0") == "1")
+          unavailable = sum(1 for v in vms if v.get("available", "0") != "1")
           total_vms   = len(vms)
 
           now        = datetime.now().strftime('%d/%m/%Y')
