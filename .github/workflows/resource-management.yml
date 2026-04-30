@@ -24,7 +24,7 @@ on:
 env:
   ZABBIX_URL: "http://172.19.14.52/zabbix"
   ZABBIX_USER: "Admin"
-  ZABBIX_PASSWORD: ${{ secrets.ZABBIX_PASSWORD }}
+  ZABBIX_PASSWORD: ${{ secrets.MDP_ZABBIX }}
   PROXMOX_HOST: ${{ secrets.PROXMOX_HOST }}
   PROXMOX_TOKEN: ${{ secrets.PROXMOX_API_TOKEN }}
 
@@ -32,7 +32,7 @@ jobs:
   # Job 1 : Analyser les métriques Zabbix
   analyze-resources:
     name: Analyze Zabbix Metrics
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       # Résultats partagés avec les autres jobs
       scale_up_vms: ${{ steps.analyze.outputs.scale_up_vms }}
@@ -316,7 +316,7 @@ jobs:
   #Job 2 : Scale Up
   scale-up:
     name: Scale Up Resources
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: analyze-resources
     if: needs.analyze-resources.outputs.scale_up_vms != '[]'
     environment: production
@@ -425,7 +425,7 @@ jobs:
   #Job 3 : Scale Down
   scale-down:
     name: Scale Down Resources
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: analyze-resources
     if: needs.analyze-resources.outputs.scale_down_vms != '[]'
     environment: production
@@ -526,7 +526,7 @@ jobs:
   # Job 4 : Alertes critiques
   critical-alerts:
     name: Critical Alerts
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: analyze-resources
     if: needs.analyze-resources.outputs.critical_vms != '[]'
    
