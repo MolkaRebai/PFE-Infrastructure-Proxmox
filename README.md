@@ -143,7 +143,7 @@ Replication · pfSense · Python (Jinja2, requests)
 
 ## Full write-up
 
-The [portfolio write-up](https://molkarebai.github.io/posts/proxmox-infrastructure.html)
+The [portfolio write-up](https://molkarebai.github.io/proxmox-infrastructure.html)
 covers the actual validation done on this infrastructure — a hard node kill
 to test HA failover, a `stress-ng`-driven auto-scaling test, and a full
 disaster-recovery restore of a deleted 160 GB VM — plus an honest section on
