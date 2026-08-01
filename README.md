@@ -6,7 +6,7 @@ with Ansible, monitors them with Zabbix, and reports on them weekly — with
 no manual intervention.
 
 📖 Full write-up (problem, test results, honest limitations):
-[molkarebai.github.io](https://molkarebai.github.io/posts/proxmox-infrastructure.html)
+[molkarebai.github.io](https://molkarebai.github.io/proxmox-infrastructure.html)
 
 ---
 
